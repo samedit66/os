@@ -105,36 +105,45 @@ feature {NONE} -- Windows arguments
         end
 
     append_windows_argument (a_command_line: STRING_32; a_argument: READABLE_STRING_GENERAL)
-            -- Append quoted `a_argument` using Microsoft C runtime parsing rules.
+            -- Append `a_argument` using Microsoft C runtime parsing rules.
         local
             argument: STRING_32
             character: CHARACTER_32
             index: INTEGER
             backslash_count: INTEGER
+            quoted: BOOLEAN
         do
             argument := a_argument.to_string_32
-            a_command_line.append_character ('%"')
-            from
-                index := 1
-            until
-                index > argument.count
-            loop
-                character := argument.item (index)
-                if character = '\' then
-                    backslash_count := backslash_count + 1
-                elseif character = '%"' then
-                    append_backslashes (a_command_line, backslash_count * 2 + 1)
-                    a_command_line.append_character (character)
-                    backslash_count := 0
-                else
-                    append_backslashes (a_command_line, backslash_count)
-                    backslash_count := 0
-                    a_command_line.append_character (character)
+            quoted := argument.is_empty or else
+                argument.has (' ') or else
+                argument.has ('%T') or else
+                argument.has ('%"')
+            if quoted then
+                a_command_line.append_character ('%"')
+                from
+                    index := 1
+                until
+                    index > argument.count
+                loop
+                    character := argument.item (index)
+                    if character = '\' then
+                        backslash_count := backslash_count + 1
+                    elseif character = '%"' then
+                        append_backslashes (a_command_line, backslash_count * 2 + 1)
+                        a_command_line.append_character (character)
+                        backslash_count := 0
+                    else
+                        append_backslashes (a_command_line, backslash_count)
+                        backslash_count := 0
+                        a_command_line.append_character (character)
+                    end
+                    index := index + 1
                 end
-                index := index + 1
+                append_backslashes (a_command_line, backslash_count * 2)
+                a_command_line.append_character ('%"')
+            else
+                a_command_line.append (argument)
             end
-            append_backslashes (a_command_line, backslash_count * 2)
-            a_command_line.append_character ('%"')
         end
 
     append_backslashes (a_command_line: STRING_32; a_count: INTEGER)

@@ -14,6 +14,8 @@ concurrency:
 
 env:
   GOBO_TAG: gobo-26.06
+  EIFFELSTUDIO_VERSION: "25.12"
+  EIFFELSTUDIO_REVISION: "98922"
 
 jobs:
   native-c:
@@ -104,10 +106,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install EiffelStudio on Ubuntu
         if: runner.os == 'Linux'
-        run: |
-          sudo add-apt-repository --yes ppa:eiffelstudio-team/ppa
-          sudo apt-get update
-          sudo apt-get install --yes eiffelstudio
+        run: bash .github/scripts/install-eiffelstudio.sh
       - name: Install EiffelStudio on macOS
         if: runner.os == 'macOS'
         run: brew install eiffelstudio
@@ -115,6 +114,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: .github/scripts/install-eiffelstudio.ps1
+      - name: Report EiffelStudio version
+        run: ec -version
       - name: Compile and test
         if: runner.os != 'Windows'
         run: make test-ise

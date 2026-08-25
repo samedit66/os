@@ -1,28 +1,46 @@
 $ErrorActionPreference = "Stop"
 
-$installer = Join-Path $env:RUNNER_TEMP "get-eiffelstudio.bat"
-curl.exe -fsSL -o $installer https://www.eiffel.org/setup/install.bat
-if ($LASTEXITCODE -ne 0) { throw "Cannot download the EiffelStudio installer" }
-
-Push-Location $env:RUNNER_TEMP
-try {
-    & cmd.exe /d /c "`"$installer`" latest"
-    if ($LASTEXITCODE -ne 0) { throw "EiffelStudio installation failed" }
+$version = $env:EIFFELSTUDIO_VERSION
+$revision = $env:EIFFELSTUDIO_REVISION
+if ([string]::IsNullOrWhiteSpace($version)) {
+    throw "EIFFELSTUDIO_VERSION is required"
 }
-finally {
-    Pop-Location
+if ([string]::IsNullOrWhiteSpace($revision)) {
+    throw "EIFFELSTUDIO_REVISION is required"
 }
-
-$compiler = Get-ChildItem -Path $env:RUNNER_TEMP -Recurse -File -Filter ec.exe |
-    Where-Object { $_.FullName -match '[\\/]studio[\\/]spec[\\/][^\\/]+[\\/]bin[\\/]ec\.exe$' } |
-    Select-Object -First 1
-if ($null -eq $compiler) {
-    throw "The EiffelStudio installation does not contain ec.exe"
+if ($env:RUNNER_ARCH -ne "X64") {
+    throw "Unsupported runner architecture: $env:RUNNER_ARCH"
 }
 
-$platform = $compiler.Directory.Parent.Name
-$root = $compiler.Directory.Parent.Parent.Parent.Parent.FullName
+$platform = "win64"
+$archiveName = "Eiffel_${version}_rev_${revision}-${platform}.7z"
+$archiveUrl = "https://www.eiffel.com/cdn/EiffelStudio/$version/$revision/$archiveName"
+$archive = Join-Path $env:RUNNER_TEMP $archiveName
+$distribution = Join-Path $env:RUNNER_TEMP "eiffelstudio-distribution"
+$root = Join-Path $distribution "Eiffel_$version"
+$compiler = Join-Path $root "studio\spec\$platform\bin\ec.exe"
+
+New-Item -ItemType Directory -Force -Path $distribution | Out-Null
+curl.exe -fsSL -o $archive $archiveUrl
+if ($LASTEXITCODE -ne 0) { throw "Cannot download $archiveUrl" }
+
+$sevenZip = (Get-Command 7z.exe -ErrorAction Stop).Source
+& $sevenZip x $archive "-o$distribution" -y | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Cannot extract $archive" }
+
+if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
+    throw "The EiffelStudio archive does not contain $compiler"
+}
+
+$compilerDirectory = Split-Path -Parent $compiler
+$env:ISE_EIFFEL = $root
+$env:ISE_LIBRARY = $root
+$env:ISE_PLATFORM = $platform
+$env:PATH = "$compilerDirectory;$env:PATH"
+& $compiler -version
+if ($LASTEXITCODE -ne 0) { throw "The EiffelStudio compiler cannot start" }
+
 "ISE_EIFFEL=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 "ISE_LIBRARY=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 "ISE_PLATFORM=$platform" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-$compiler.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+$compilerDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append

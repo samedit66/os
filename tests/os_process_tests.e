@@ -29,16 +29,21 @@ feature -- Test
             arguments: ARRAYED_LIST [READABLE_STRING_GENERAL]
         do
             create runner
-            create arguments.make (6)
+            create arguments.make (7)
             arguments.extend ("--child")
             arguments.extend ("arguments")
             arguments.extend ("hello world")
             arguments.extend ("a%"b")
             arguments.extend ("c\d")
+            arguments.extend ("ends with slash\")
             arguments.extend ("")
             process_result := runner.run (process_child_executable, arguments)
             assert_integers_equal ("arguments exit", 0, process_result.exit_code)
-            assert_strings_equal ("arguments stdout", "[11]hello world[3]a%"b[3]c\d[0]", process_result.stdout)
+            assert_strings_equal (
+                "arguments stdout",
+                "[11]hello world[3]a%"b[3]c\d[16]ends with slash\[0]",
+                process_result.stdout
+            )
             assert_true ("arguments stderr", process_result.stderr.is_empty)
         end
 

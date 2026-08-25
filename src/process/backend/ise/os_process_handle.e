@@ -24,7 +24,13 @@ feature {NONE} -- Initialization
             exit_code := -1
             create factory
             executable := resolved_executable (a_executable)
-            implementation := factory.process_launcher (executable, a_arguments, Void)
+            if {PLATFORM}.is_windows then
+                implementation := factory.process_launcher_with_command_line (
+                    windows_command_line (executable, a_arguments), Void
+                )
+            else
+                implementation := factory.process_launcher (executable, a_arguments, Void)
+            end
             implementation.redirect_output_to_agent (agent receive_stdout)
             implementation.redirect_error_to_agent (agent receive_stderr)
             implementation.launch
@@ -77,6 +83,74 @@ feature {NONE} -- Executable lookup
                         directories.forth
                     end
                 end
+            end
+        end
+
+feature {NONE} -- Windows arguments
+
+    windows_command_line (
+        a_executable: READABLE_STRING_GENERAL;
+        a_arguments: ITERABLE [READABLE_STRING_GENERAL]
+    ): STRING_32
+            -- Windows command line preserving every argument as one `argv` item.
+        do
+            create Result.make (a_executable.count)
+            append_windows_argument (Result, a_executable)
+            across a_arguments as argument loop
+                Result.append_character (' ')
+                append_windows_argument (Result, argument)
+            end
+        ensure
+            not_empty: not Result.is_empty
+        end
+
+    append_windows_argument (a_command_line: STRING_32; a_argument: READABLE_STRING_GENERAL)
+            -- Append quoted `a_argument` using Microsoft C runtime parsing rules.
+        local
+            argument: STRING_32
+            character: CHARACTER_32
+            index: INTEGER
+            backslash_count: INTEGER
+        do
+            argument := a_argument.to_string_32
+            a_command_line.append_character ('%"')
+            from
+                index := 1
+            until
+                index > argument.count
+            loop
+                character := argument.item (index)
+                if character = '\' then
+                    backslash_count := backslash_count + 1
+                elseif character = '%"' then
+                    append_backslashes (a_command_line, backslash_count * 2 + 1)
+                    a_command_line.append_character (character)
+                    backslash_count := 0
+                else
+                    append_backslashes (a_command_line, backslash_count)
+                    backslash_count := 0
+                    a_command_line.append_character (character)
+                end
+                index := index + 1
+            end
+            append_backslashes (a_command_line, backslash_count * 2)
+            a_command_line.append_character ('%"')
+        end
+
+    append_backslashes (a_command_line: STRING_32; a_count: INTEGER)
+            -- Append `a_count` backslashes to `a_command_line`.
+        require
+            non_negative_count: a_count >= 0
+        local
+            index: INTEGER
+        do
+            from
+                index := 1
+            until
+                index > a_count
+            loop
+                a_command_line.append_character ('\')
+                index := index + 1
             end
         end
 

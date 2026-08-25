@@ -54,6 +54,15 @@ matrix:
 | EiffelStudio | ✓ | ✓ | ✓ | EiffelStudio `PROCESS` library |
 | Gobo Eiffel | ✓ | ✓ | ✓ | Eiffel threads over a small native C11 bridge |
 
+> [!IMPORTANT]
+> The EiffelStudio 25.12 `process` library
+> (`$ISE_LIBRARY/library/process/process.ecf`) has a Windows argument-quoting
+> bug in `PROCESS_FACTORY.process_launcher`: embedded double quotes and
+> backslashes preceding quotes may be passed to the child process incorrectly.
+> The `os` EiffelStudio backend works around this limitation using the Microsoft
+> C runtime argument-parsing rules. Callers should pass unescaped arguments to
+> `OS_PROCESS_RUNNER.run` and `start`; no application-level workaround is needed.
+
 File-path operations use the common EiffelBase/FreeELKS `PATH`, `FILE_INFO`,
 `DIRECTORY`, and file classes. They do not need a compiler-specific backend.
 

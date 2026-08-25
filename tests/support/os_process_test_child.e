@@ -37,8 +37,8 @@ feature {NONE} -- Child modes
             elseif mode.same_string_general ("exit-seven") then
                 exceptions.die (7)
             elseif mode.same_string_general ("emit") then
-                io.put_string ("stdout-data%N")
-                io.error.put_string ("stderr-data%N")
+                io.put_string ("stdout-data")
+                io.error.put_string ("stderr-data")
             elseif mode.same_string_general ("large") then
                 emit_large_output
             elseif mode.same_string_general ("sleep") then

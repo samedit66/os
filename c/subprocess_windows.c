@@ -155,7 +155,6 @@ os_process *os_process_start(
     PROCESS_INFORMATION information = {0};
     SIZE_T attributes_size = 0;
     HANDLE inherited[3];
-    wchar_t *wide_executable = NULL;
     wchar_t *command_line = NULL;
     os_process *process = NULL;
     DWORD windows_error = ERROR_SUCCESS;
@@ -166,9 +165,8 @@ os_process *os_process_start(
         *error_code = ERROR_INVALID_PARAMETER;
         return NULL;
     }
-    wide_executable = utf8_to_wide(executable, error_code);
     command_line = build_command_line(arguments, error_code);
-    if (wide_executable == NULL || command_line == NULL) goto fail;
+    if (command_line == NULL) goto fail;
     if (!CreatePipe(&stdout_read, &stdout_write, &security, 0) ||
         !SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0) ||
         !CreatePipe(&stderr_read, &stderr_write, &security, 0) ||
@@ -211,7 +209,7 @@ os_process *os_process_start(
 
     ZeroMemory(&information, sizeof(information));
     if (!CreateProcessW(
-        wide_executable, command_line, NULL, NULL, TRUE,
+        NULL, command_line, NULL, NULL, TRUE,
         EXTENDED_STARTUPINFO_PRESENT, NULL, NULL,
         &startup.StartupInfo, &information
     )) {
@@ -242,7 +240,6 @@ fail:
         DeleteProcThreadAttributeList(startup.lpAttributeList);
         free(startup.lpAttributeList);
     }
-    free(wide_executable);
     free(command_line);
     close_handle(&stdout_read);
     close_handle(&stdout_write);

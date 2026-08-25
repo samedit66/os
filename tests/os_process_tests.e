@@ -71,8 +71,8 @@ feature -- Test
             )
             process.wait
             assert_integers_equal ("stream exit", 0, process.exit_code)
-            assert_strings_equal ("stream stdout", "stdout-data%N", process.stdout)
-            assert_strings_equal ("stream stderr", "stderr-data%N", process.stderr)
+            assert_strings_equal ("stream stdout", "stdout-data", process.stdout)
+            assert_strings_equal ("stream stderr", "stderr-data", process.stderr)
             assert_strings_equal ("stdout callback", process.stdout, callback_stdout)
             assert_strings_equal ("stderr callback", process.stderr, callback_stderr)
             assert_true ("stream finished", process.is_finished)

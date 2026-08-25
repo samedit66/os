@@ -1,0 +1,12 @@
+.DS_Store
+/.gobo/
+/EIFGENs/
+/build/
+/os_process_example
+/os_process_tests
+/os_file_path_tests
+*.epr
+*.o
+*.obj
+*.lib
+*.a

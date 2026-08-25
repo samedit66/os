@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOBO_TAG: gobo-26.06
+
+jobs:
+  native-c:
+    name: C / ${{ matrix.os }} / ${{ matrix.compiler }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            compiler: gcc
+          - os: ubuntu-24.04
+            compiler: clang
+          - os: macos-14
+            compiler: clang
+          - os: windows-2022
+            compiler: msvc
+          - os: windows-2022
+            compiler: clang-cl
+    steps:
+      - uses: actions/checkout@v6
+      - name: Compile POSIX bridge
+        if: runner.os != 'Windows'
+        run: make native CC=${{ matrix.compiler }}
+      - name: Compile Windows bridge
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: .github\scripts\build-windows-c.cmd ${{ matrix.compiler }}
+
+  gobo:
+    name: Gobo / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Gobo
+        if: runner.os != 'Windows'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/install-gobo.sh
+      - name: Install Gobo
+        if: runner.os == 'Windows'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: .github/scripts/install-gobo.ps1
+      - name: Build and test
+        if: runner.os != 'Windows'
+        run: make test-gobo
+      - name: Build native library
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: .github\scripts\build-windows-c.cmd msvc library
+      - name: Compile tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:GOBO_EIFFEL = "ge"
+          $env:ZIG_GLOBAL_CACHE_DIR = Join-Path $pwd "build\zig-global-cache"
+          $env:ZIG_LOCAL_CACHE_DIR = Join-Path $pwd "build\zig-local-cache"
+          & "$env:GOBO\bin\gec.exe" --variable=GOBO_EIFFEL=ge --ise=25.12 --gelint --target=os_process_tests os.ecf
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:GOBO\bin\gec.exe" --variable=GOBO_EIFFEL=ge --ise=25.12 --gelint --target=os_file_path_tests os.ecf
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\os_process_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\os_file_path_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  eiffelstudio:
+    name: EiffelStudio / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install EiffelStudio on Ubuntu
+        if: runner.os == 'Linux'
+        run: |
+          sudo add-apt-repository --yes ppa:eiffelstudio-team/ppa
+          sudo apt-get update
+          sudo apt-get install --yes eiffelstudio
+      - name: Install EiffelStudio on macOS
+        if: runner.os == 'macOS'
+        run: brew install eiffelstudio
+      - name: Install EiffelStudio on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .github/scripts/install-eiffelstudio.ps1
+      - name: Compile and test
+        if: runner.os != 'Windows'
+        run: make test-ise
+      - name: Compile tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:GOBO_EIFFEL = "ise"
+          ec.exe -batch -clean -config os.ecf -target os_process_tests -finalize -keep -c_compile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ec.exe -batch -clean -config os.ecf -target os_file_path_tests -finalize -keep -c_compile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\EIFGENs\os_process_tests\F_code\os_process_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\EIFGENs\os_file_path_tests\F_code\os_file_path_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

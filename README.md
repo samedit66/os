@@ -21,6 +21,11 @@ The library currently covers process execution and file-system paths. Its main
 goal is to hide compiler- and platform-specific machinery behind a compact API
 without hiding the places where operating systems genuinely behave differently.
 
+> [!WARNING]
+> This library is currently being tested and its public API is still being
+> refined to make it as convenient and useful as possible. Breaking changes
+> should be expected.
+
 ## Features
 
 - One API for EiffelStudio and Gobo Eiffel.

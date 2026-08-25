@@ -1,175 +1,229 @@
-# os
+<div align="center">
 
-`os` is a portable Eiffel library for common operating-system operations.
-`os.ecf` is its only ECF configuration and exposes process and file-path APIs.
+# `os`
 
-Applications reference `os.ecf` directly:
+### Portable OS APIs for Eiffel
+
+[![Language: Eiffel](https://img.shields.io/badge/language-Eiffel-6f42c1)](https://www.eiffel.org/)
+[![ISE Eiffel](https://img.shields.io/badge/toolchain-ISE%20Eiffel-17365D)](https://www.eiffel.com/)
+[![Gobo Eiffel](https://img.shields.io/badge/toolchain-Gobo%20Eiffel-8B5A2B)](https://www.gobosoft.com/)
+[![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-2f855a)](https://github.com/samedit66/os/actions/workflows/ci.yml)
+[![CI](https://github.com/samedit66/os/actions/workflows/ci.yml/badge.svg)](https://github.com/samedit66/os/actions/workflows/ci.yml)
+
+</div>
+
+`os` is a void-safe Eiffel library that provides small, convenient APIs for
+common operating-system tasks. The same public classes and the same `os.ecf`
+configuration work with EiffelStudio and Gobo Eiffel on Linux, macOS, and
+Windows.
+
+The library currently covers process execution and file-system paths. Its main
+goal is to hide compiler- and platform-specific machinery behind a compact API
+without hiding the places where operating systems genuinely behave differently.
+
+## Features
+
+- One API for EiffelStudio and Gobo Eiffel.
+- Linux, macOS, and Windows support, continuously tested with both compilers.
+- Synchronous process execution with captured standard output and error.
+- Asynchronous processes with streaming callbacks, status polling, waiting,
+  and termination.
+- Safe argument-vector execution that does not construct a shell command.
+- An explicit shell helper for commands that require platform shell syntax.
+- Portable path composition, inspection, text I/O, directory creation, and
+  recursive deletion.
+- Void-safe interfaces with contracts and no compiler conditionals in client
+  code.
+
+The small public surface is organized around four classes:
+
+| Class | Purpose |
+| --- | --- |
+| `OS_PROCESS_RUNNER` | Starts a process or runs it to completion |
+| `OS_PROCESS_HANDLE` | Exposes a running process, captured output, and lifecycle operations |
+| `OS_PROCESS_RESULT` | Holds the exit code, standard output, and standard error of a completed run |
+| `OS_FILE_PATH` | Represents a path and provides common file and directory operations |
+
+## Portability
+
+Client code is identical across the supported compiler and operating-system
+matrix:
+
+| Toolchain | Linux | macOS | Windows | Process backend |
+| --- | :---: | :---: | :---: | --- |
+| EiffelStudio | ✓ | ✓ | ✓ | EiffelStudio `PROCESS` library |
+| Gobo Eiffel | ✓ | ✓ | ✓ | Eiffel threads over a small native C11 bridge |
+
+File-path operations use the common EiffelBase/FreeELKS `PATH`, `FILE_INFO`,
+`DIRECTORY`, and file classes. They do not need a compiler-specific backend.
+
+Platform differences remain explicit where they matter. `shell` uses
+`/bin/sh -c` on POSIX systems and `COMSPEC` (falling back to `cmd.exe`) with
+`/D /S /C` on Windows. `terminate` maps to `SIGTERM` on POSIX and
+`TerminateProcess` on Windows.
+
+## Installation
+
+Add `os` to an Eiffel project as a Git submodule:
+
+```console
+git submodule add https://github.com/samedit66/os.git vendor/os
+git submodule update --init
+```
+
+Reference the library from the consuming project's ECF file:
 
 ```xml
-<library name="os" location="path/to/os.ecf"/>
+<library name="os" location="./vendor/os/os.ecf" readonly="true"/>
 ```
 
-The configuration contains four targets: the `os` library target, the
-`application` example, the generated `os_tests` harness, and its
-`os_process_test_child` helper. It does not reference nested project libraries;
-compiler-specific dependencies and backend clusters are selected directly by
-`os.ecf`.
+The same ECF reference is used by both compilers. EiffelStudio selects its
+`PROCESS` backend and needs no native library from this repository. Gobo selects
+the native backend when `GOBO_EIFFEL=ge`; build its C bridge before compiling.
+On Linux and macOS:
 
-The library has four public classes:
+```console
+make -C vendor/os native
+```
 
-- `OS_PROCESS_RUNNER` starts and runs programs;
-- `OS_PROCESS_HANDLE` represents a running or completed program;
-- `OS_PROCESS_RESULT` contains the result of a synchronous run;
-- `OS_FILE_PATH` represents a file-system path and provides common file and
-  directory operations.
+On Windows, run the following from a Visual Studio developer command prompt:
 
-## File-path API
+```console
+cd vendor\os
+.github\scripts\build-windows-c.cmd msvc library
+```
 
-Create a directory, extend its path, and write and read a text file:
+## Usage
+
+### Run a process
+
+Create a runner, pass the executable and its arguments separately, and receive
+a typed result:
 
 ```eiffel
-create directory.make ("build/example")
-directory.create_directory
-file := directory / "message.txt"
-file.write_text ("Hello from os%N")
-io.put_string (file.read_text)
+local
+    runner: OS_PROCESS_RUNNER
+    result: OS_PROCESS_RESULT
+do
+    create runner
+    result := runner.run ("git", << "status", "--short" >>)
+
+    if result.successful then
+        io.put_string (result.stdout)
+    else
+        io.error.put_string (result.stderr)
+    end
+end
 ```
 
-`OS_FILE_PATH.make` accepts a path name, while `make_from_path` accepts an
-existing Eiffel `PATH`. The `/` operator appends a nonempty relative path.
-`parent` and `canonical_path` return new `OS_FILE_PATH` objects without changing
-the original path.
+`run` passes the argument vector directly to the child process. Spaces, quotes,
+backslashes, and empty arguments do not require shell escaping.
 
-`create_directory` creates missing parents and is a no-op for an existing
-directory. `write_text` replaces a plain file with UTF-8 encoded text;
-`read_text` returns its complete encoded bytes as a `STRING_8`.
+### Stream process output
 
-`delete_recursively` is a no-op for a missing entry. It deletes directory trees,
-plain files, and symbolic links. A symbolic link itself is deleted without
-traversing or deleting its target, including when the target does not exist.
-
-The path implementation is shared by EiffelStudio and Gobo through the common
-EiffelBase/FreeELKS `PATH`, `FILE_INFO`, `DIRECTORY`, and file classes; it does
-not require compiler-specific backends.
-
-## Process API
-
-Run an executable synchronously with an explicit argument vector:
+Use `start` when output should be handled as it arrives or when the caller needs
+control over the process lifecycle:
 
 ```eiffel
-create runner
-result := runner.run ("git", << "status", "--short" >>)
-io.put_string (result.stdout)
+local
+    runner: OS_PROCESS_RUNNER
+    process: OS_PROCESS_HANDLE
+do
+    create runner
+    process := runner.start (
+        "git",
+        << "status", "--short" >>,
+        agent on_stdout,
+        agent on_stderr
+    )
+    process.wait
+end
 ```
 
-Start it asynchronously and receive output as it arrives:
+The handle provides `is_finished`, `wait`, `terminate`, `exit_code`, `stdout`,
+and `stderr`. Output callbacks may run concurrently and should return quickly;
+ordering is preserved within each stream, not between standard output and
+standard error. Both streams are exposed as raw `STRING_8` byte sequences; the
+library does not impose an output encoding.
 
-```eiffel
-process := runner.start (
-    "git",
-    << "status", "--short" >>,
-    agent on_stdout,
-    agent on_stderr
-)
-process.wait
-```
-
-Run a command through the platform shell:
+For commands that intentionally require a shell, use the separate helper:
 
 ```eiffel
 result := runner.shell ("git --version")
 ```
 
-`run` and `start` pass arguments directly to the child process and never
-construct a shell command. This preserves spaces, quotes, backslashes, and empty
-arguments without shell escaping.
+Shell syntax is platform-dependent. Do not concatenate untrusted input into a
+shell command; use `run` with an explicit argument vector instead.
 
-`shell` deliberately has different semantics: POSIX uses `/bin/sh -c`, while
-Windows uses `COMSPEC` (or `cmd.exe` when it is unavailable) with `/D /S /C`.
-Shell syntax is platform-dependent. Never construct a shell command by
-concatenating untrusted input; use `run` with an explicit argument vector
-instead.
+### Work with paths
 
-`stdout` and `stderr` are raw 8-bit byte chunks. No encoding conversion is
-performed on child output.
+The path API keeps routine file-system work concise and portable:
 
-Callbacks for the two streams may run concurrently, preserve order only within
-their own stream, and should return quickly. Callback failures are remembered
-while both pipes continue to drain and are raised by `wait` after the child and
-readers complete. Complete captured output is available after `wait`; reading
-it while the process is running is unspecified.
+```eiffel
+local
+    directory: OS_FILE_PATH
+    file: OS_FILE_PATH
+do
+    create directory.make ("build/example")
+    directory.create_directory
 
-`terminate` requests termination. POSIX sends `SIGTERM`; Windows uses
-`TerminateProcess`, so exact semantics are platform-dependent.
+    file := directory / "message.txt"
+    file.write_text ("Hello from os%N")
+    io.put_string (file.read_text)
+end
+```
 
-## Why use the process API
+`OS_FILE_PATH` also provides `exists`, `is_directory`, `is_plain_file`,
+`is_empty_directory`, `parent`, `canonical_path`, and `delete_recursively`.
+Recursive deletion removes a symbolic link itself and never follows it to its
+target.
 
-### EiffelStudio
+## Building
 
-EiffelStudio's `PROCESS` library is feature-rich, but a common captured run
-requires a factory, a launcher, output/error redirection, launch, wait, and
-manual result storage. `OS_PROCESS_RUNNER.run` reduces that workflow to one
-operation returning an `OS_PROCESS_RESULT`; `start` provides the same compact
-API for asynchronous work.
+Required tools are Gobo Eiffel 26.06, EiffelStudio 25.12 or later, and a C11
+compiler plus an archiver for the Gobo process backend.
 
-The process API is an ergonomic portable facade, not a replacement for advanced
-`PROCESS` features. Use `PROCESS` directly when stdin, a working directory,
-environment customization, timeouts, process trees, or detailed redirection
-control are required.
+On Linux and macOS, build and run the example with Gobo Eiffel:
 
-### Gobo Eiffel
-
-Gobo's `EXECUTION_ENVIRONMENT` provides string-based `system` and `launch`
-operations. The process API adds a structured argument vector, captured stdout and
-stderr, streaming callbacks, a process handle, wait, status polling, and
-termination. Direct `run` and `start` also avoid the shell entirely.
-
-## Implementations
-
-The public API is shared, while the implementation is selected at compile time:
-
-| Compiler | Backend | Process implementation |
-| --- | --- | --- |
-| EiffelStudio | ISE backend | EiffelStudio `PROCESS` |
-| Gobo Eiffel | native backend | Eiffel threads over a native C bridge |
-
-`native` describes the process mechanism rather than promising a
-compiler-independent backend selection. The current ECF selects it for Gobo
-with `GOBO_EIFFEL=ge`; EiffelStudio uses the ISE backend.
-
-## Build and test
-
-Required tools:
-
-- Gobo Eiffel 26.06.30 (`GOBO` points to its distribution; the Makefile
-  defaults to `$HOME/Projects/gobo`). Gobo also supplies `getest` and the test
-  harness when the tests are compiled with EiffelStudio;
-- EiffelStudio 25.02 or later (`ec` on `PATH`);
-- a C11 compiler and archiver for the native backend.
-
-```sh
+```console
 make gobo
+```
+
+Build and run the same example with EiffelStudio:
+
+```console
 make ise
-make test-gobo
-make test-ise
+```
+
+Tool locations can be overridden when necessary:
+
+```console
+make gobo GOBO=/path/to/gobo GEC=/path/to/gec GELINT=/path/to/gelint CC=clang
+```
+
+## Tests
+
+On Linux and macOS, run the shared test suite with both compilers:
+
+```console
 make test
 ```
 
-Override tool locations when needed:
+Or select one toolchain:
 
-```sh
-make gobo GEC=/path/to/gec GELINT=/path/to/gelint CC=clang
+```console
+make test-gobo
+make test-ise
 ```
 
-The test commands generate a Gobo Test harness in `build/testgen` and run the
-same process and file-path test cases with both Eiffel compilers. Generated
-sources are build artifacts and are not committed. GitHub Actions has separate
-matrices for native C compilation, Gobo behavior on Ubuntu/macOS/Windows, and
-EiffelStudio behavior on Ubuntu/macOS/Windows. The C bridge is compiled with
-GCC, Clang, MSVC, and clang-cl.
+The tests are generated with Gobo Test and exercise the same process and path
+behavior under both compilers. CI extends that matrix across Ubuntu, macOS, and
+Windows. The native bridge is additionally compiled with GCC, Clang, MSVC, and
+clang-cl.
 
 ## Scope
 
-Version 1 of the process API has no working-directory or environment
-configuration, stdin control, timeout, asynchronous shell helper, or separate
-hard-kill operation.
+The process API deliberately focuses on the common portable workflow. For
+advanced EiffelStudio-only features such as custom standard input, working
+directories, environment replacement, timeouts, process trees, or detailed
+redirection control, use the EiffelStudio `PROCESS` library directly.

@@ -15,7 +15,7 @@ feature {NONE} -- Initialization
             create runner
             process := runner.start (
                 "git",
-                << "status", "--short" >>,
+                << "--version" >>,
                 agent on_stdout,
                 agent on_stderr
             )

@@ -36,6 +36,7 @@ $compilerDirectory = Split-Path -Parent $compiler
 $env:ISE_EIFFEL = $root
 $env:ISE_LIBRARY = $root
 $env:ISE_PLATFORM = $platform
+$env:ISE_C_COMPILER = "msc_vc140"
 $env:PATH = "$compilerDirectory;$env:PATH"
 & $compiler -version
 if ($LASTEXITCODE -ne 0) { throw "The EiffelStudio compiler cannot start" }
@@ -43,4 +44,5 @@ if ($LASTEXITCODE -ne 0) { throw "The EiffelStudio compiler cannot start" }
 "ISE_EIFFEL=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 "ISE_LIBRARY=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 "ISE_PLATFORM=$platform" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+"ISE_C_COMPILER=$env:ISE_C_COMPILER" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 $compilerDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append

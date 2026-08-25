@@ -54,22 +54,25 @@
         </capability>
         <cluster name="example" location="src" recursive="false"/>
     </target>
-    <target name="os_process_tests" extends="os">
-        <root class="OS_PROCESS_TESTS" feature="make"/>
+    <target name="os_process_test_child" extends="os">
+        <root class="OS_PROCESS_TEST_CHILD" feature="make"/>
         <setting name="console_application" value="true"/>
-        <setting name="executable_name" value="os_process_tests"/>
+        <setting name="executable_name" value="os_process_test_child"/>
         <capability>
             <concurrency support="thread" use="thread"/>
         </capability>
-        <cluster name="tests" location="tests" recursive="false"/>
+        <cluster name="test_support" location="tests/support" recursive="false"/>
     </target>
-    <target name="os_file_path_tests" extends="os">
-        <root class="OS_FILE_PATH_TESTS" feature="make"/>
+    <target name="os_tests" extends="os">
+        <root class="OS_TESTS" feature="make"/>
         <setting name="console_application" value="true"/>
-        <setting name="executable_name" value="os_file_path_tests"/>
+        <setting name="executable_name" value="os_tests"/>
         <capability>
             <concurrency support="thread" use="thread"/>
         </capability>
+        <library name="gobo_test" location="${GOBO}/library/test/library_skl.ecf" readonly="true"/>
+        <library name="gobo_regexp" location="${GOBO}/library/regexp/library.ecf" readonly="true"/>
         <cluster name="tests" location="tests" recursive="false"/>
+        <cluster name="testgen" location="build/testgen" recursive="false"/>
     </target>
 </system>

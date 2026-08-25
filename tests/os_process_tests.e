@@ -1,62 +1,34 @@
 class
     OS_PROCESS_TESTS
 
+inherit
+    TS_TEST_CASE
+        redefine
+            initialize
+        end
+
 create
-    make
+    make_default
 
 feature {NONE} -- Initialization
 
-    make
-            -- Run the test suite, or act as a child process for one test.
-        local
-            arguments: ARGUMENTS_32
+    initialize
+            -- Initialize callback buffers for one test case.
         do
-            create arguments
             create callback_stdout.make_empty
             create callback_stderr.make_empty
-            if arguments.argument_count >= 2 and then arguments.argument (1).same_string_general ("--child") then
-                run_child (arguments)
-            else
-                run_suite (arguments.command_name)
-            end
         end
 
-feature {NONE} -- Test suite
+feature -- Test
 
-    run_suite (a_test_executable: READABLE_STRING_GENERAL)
-            -- Exercise the public process API using this executable as the child.
-        local
-            runner: OS_PROCESS_RUNNER
-            exceptions: EXCEPTIONS
-        do
-            create runner
-            create exceptions
-            test_arguments (runner, a_test_executable)
-            test_nonzero_exit (runner, a_test_executable)
-            test_streaming_callbacks (runner, a_test_executable)
-            test_large_output (runner, a_test_executable)
-            test_wait_is_idempotent (runner, a_test_executable)
-            test_path_lookup (runner)
-            test_shell (runner)
-            test_missing_command (runner)
-            test_termination (runner, a_test_executable)
-
-            if failure_count = 0 then
-                io.put_string ("All os_process tests passed.%N")
-            else
-                io.error.put_string ("Failures: ")
-                io.error.put_integer (failure_count)
-                io.error.put_new_line
-                exceptions.die (1)
-            end
-        end
-
-    test_arguments (a_runner: OS_PROCESS_RUNNER; a_test_executable: READABLE_STRING_GENERAL)
+    test_arguments
             -- Preserve spaces, quotes, backslashes, and an empty argument.
         local
+            runner: OS_PROCESS_RUNNER
             process_result: OS_PROCESS_RESULT
             arguments: ARRAYED_LIST [READABLE_STRING_GENERAL]
         do
+            create runner
             create arguments.make (6)
             arguments.extend ("--child")
             arguments.extend ("arguments")
@@ -64,191 +36,139 @@ feature {NONE} -- Test suite
             arguments.extend ("a%"b")
             arguments.extend ("c\d")
             arguments.extend ("")
-            process_result := a_runner.run (a_test_executable, arguments)
-            assert ("arguments exit", process_result.exit_code = 0)
-            assert ("arguments stdout", process_result.stdout.same_string ("[11]hello world[3]a%"b[3]c\d[0]"))
-            assert ("arguments stderr", process_result.stderr.is_empty)
+            process_result := runner.run (process_child_executable, arguments)
+            assert_integers_equal ("arguments exit", 0, process_result.exit_code)
+            assert_strings_equal ("arguments stdout", "[11]hello world[3]a%"b[3]c\d[0]", process_result.stdout)
+            assert_true ("arguments stderr", process_result.stderr.is_empty)
         end
 
-    test_nonzero_exit (a_runner: OS_PROCESS_RUNNER; a_test_executable: READABLE_STRING_GENERAL)
+    test_nonzero_exit
             -- Return the child's nonzero exit status.
         local
+            runner: OS_PROCESS_RUNNER
             process_result: OS_PROCESS_RESULT
         do
-            process_result := a_runner.run (a_test_executable, child_arguments ("exit-seven"))
-            assert ("nonzero exit", process_result.exit_code = 7)
-            assert ("nonzero successful", not process_result.successful)
+            create runner
+            process_result := runner.run (process_child_executable, child_arguments ("exit-seven"))
+            assert_integers_equal ("nonzero exit", 7, process_result.exit_code)
+            assert_false ("nonzero successful", process_result.successful)
         end
 
-    test_streaming_callbacks (a_runner: OS_PROCESS_RUNNER; a_test_executable: READABLE_STRING_GENERAL)
+    test_streaming_callbacks
             -- Capture each stream and forward the same bytes to its callback.
         local
+            runner: OS_PROCESS_RUNNER
             process: OS_PROCESS_HANDLE
         do
             callback_stdout.wipe_out
             callback_stderr.wipe_out
-            process := a_runner.start (
-                a_test_executable,
+            create runner
+            process := runner.start (
+                process_child_executable,
                 child_arguments ("emit"),
                 agent append_stdout,
                 agent append_stderr
             )
             process.wait
-            assert ("stream exit", process.exit_code = 0)
-            assert ("stream stdout", process.stdout.same_string ("stdout-data%N"))
-            assert ("stream stderr", process.stderr.same_string ("stderr-data%N"))
-            assert ("stdout callback", callback_stdout.same_string (process.stdout))
-            assert ("stderr callback", callback_stderr.same_string (process.stderr))
-            assert ("stream finished", process.is_finished)
+            assert_integers_equal ("stream exit", 0, process.exit_code)
+            assert_strings_equal ("stream stdout", "stdout-data%N", process.stdout)
+            assert_strings_equal ("stream stderr", "stderr-data%N", process.stderr)
+            assert_strings_equal ("stdout callback", process.stdout, callback_stdout)
+            assert_strings_equal ("stderr callback", process.stderr, callback_stderr)
+            assert_true ("stream finished", process.is_finished)
         end
 
-    test_large_output (a_runner: OS_PROCESS_RUNNER; a_test_executable: READABLE_STRING_GENERAL)
+    test_large_output
             -- Drain both pipes concurrently when each exceeds kernel pipe capacity.
         local
+            runner: OS_PROCESS_RUNNER
             process_result: OS_PROCESS_RESULT
         do
-            process_result := a_runner.run (a_test_executable, child_arguments ("large"))
-            assert ("large exit", process_result.exit_code = 0)
-            assert ("large stdout", process_result.stdout.count = large_block_size * large_block_count)
-            assert ("large stderr", process_result.stderr.count = large_block_size * large_block_count)
+            create runner
+            process_result := runner.run (process_child_executable, child_arguments ("large"))
+            assert_integers_equal ("large exit", 0, process_result.exit_code)
+            assert_integers_equal ("large stdout", large_block_size * large_block_count, process_result.stdout.count)
+            assert_integers_equal ("large stderr", large_block_size * large_block_count, process_result.stderr.count)
         end
 
-    test_wait_is_idempotent (a_runner: OS_PROCESS_RUNNER; a_test_executable: READABLE_STRING_GENERAL)
+    test_wait_is_idempotent
             -- Permit clients to wait on a completed handle more than once.
         local
+            runner: OS_PROCESS_RUNNER
             process: OS_PROCESS_HANDLE
             first_output: STRING_8
         do
-            process := a_runner.start (a_test_executable, child_arguments ("emit"), Void, Void)
+            create runner
+            process := runner.start (process_child_executable, child_arguments ("emit"), Void, Void)
             process.wait
             first_output := process.stdout
             process.wait
-            assert ("second wait exit", process.exit_code = 0)
-            assert ("second wait output", process.stdout.same_string (first_output))
+            assert_integers_equal ("second wait exit", 0, process.exit_code)
+            assert_strings_equal ("second wait output", first_output, process.stdout)
         end
 
-    test_missing_command (a_runner: OS_PROCESS_RUNNER)
+    test_missing_command
             -- Represent a missing executable as the conventional launch failure.
         local
+            runner: OS_PROCESS_RUNNER
             process_result: OS_PROCESS_RESULT
         do
-            process_result := a_runner.run (
+            create runner
+            process_result := runner.run (
                 "os-process-command-that-must-not-exist-4f27a5b2",
                 create {ARRAYED_LIST [READABLE_STRING_GENERAL]}.make (0)
             )
-            assert ("missing command", process_result.exit_code = 127)
-            assert ("missing stdout", process_result.stdout.is_empty)
-            assert ("missing stderr", process_result.stderr.is_empty)
+            assert_integers_equal ("missing command", 127, process_result.exit_code)
+            assert_true ("missing stdout", process_result.stdout.is_empty)
+            assert_true ("missing stderr", process_result.stderr.is_empty)
         end
 
-    test_path_lookup (a_runner: OS_PROCESS_RUNNER)
+    test_path_lookup
             -- Find a simple executable name through PATH without invoking a shell.
         local
+            runner: OS_PROCESS_RUNNER
             process_result: OS_PROCESS_RESULT
             arguments: ARRAYED_LIST [READABLE_STRING_GENERAL]
         do
+            create runner
             create arguments.make (1)
             arguments.extend ("--version")
-            process_result := a_runner.run ("git", arguments)
-            assert ("PATH lookup", process_result.exit_code = 0)
+            process_result := runner.run ("git", arguments)
+            assert_integers_equal ("PATH lookup", 0, process_result.exit_code)
         end
 
-    test_shell (a_runner: OS_PROCESS_RUNNER)
+    test_shell
             -- Interpret command chaining and redirection through the platform shell.
         local
+            runner: OS_PROCESS_RUNNER
             process_result: OS_PROCESS_RESULT
         do
+            create runner
             if {PLATFORM}.is_windows then
-                process_result := a_runner.shell (
+                process_result := runner.shell (
                     "echo shell-stdout&echo shell-stderr 1>&2&exit /b 9"
                 )
             else
-                process_result := a_runner.shell (
+                process_result := runner.shell (
                     "printf shell-stdout; printf shell-stderr >&2; exit 9"
                 )
             end
-            assert ("shell exit", process_result.exit_code = 9)
-            assert ("shell stdout", process_result.stdout.has_substring ("shell-stdout"))
-            assert ("shell stderr", process_result.stderr.has_substring ("shell-stderr"))
+            assert_integers_equal ("shell exit", 9, process_result.exit_code)
+            assert_true ("shell stdout", process_result.stdout.has_substring ("shell-stdout"))
+            assert_true ("shell stderr", process_result.stderr.has_substring ("shell-stderr"))
         end
 
-    test_termination (a_runner: OS_PROCESS_RUNNER; a_test_executable: READABLE_STRING_GENERAL)
+    test_termination
             -- Request termination and still allow normal wait/cleanup.
         local
+            runner: OS_PROCESS_RUNNER
             process: OS_PROCESS_HANDLE
         do
-            process := a_runner.start (a_test_executable, child_arguments ("sleep"), Void, Void)
+            create runner
+            process := runner.start (process_child_executable, child_arguments ("sleep"), Void, Void)
             process.terminate
             process.wait
-            assert ("termination finished", process.is_finished)
-        end
-
-feature {NONE} -- Child modes
-
-    run_child (a_arguments: ARGUMENTS_32)
-            -- Perform the child behavior selected by argument 2.
-        local
-            mode: STRING_32
-            exceptions: EXCEPTIONS
-            environment: EXECUTION_ENVIRONMENT
-        do
-            create exceptions
-            mode := a_arguments.argument (2).to_string_32
-            if mode.same_string_general ("arguments") then
-                emit_arguments (a_arguments)
-            elseif mode.same_string_general ("exit-seven") then
-                exceptions.die (7)
-            elseif mode.same_string_general ("emit") then
-                io.put_string ("stdout-data%N")
-                io.error.put_string ("stderr-data%N")
-            elseif mode.same_string_general ("large") then
-                emit_large_output
-            elseif mode.same_string_general ("sleep") then
-                create environment
-                environment.sleep (10_000_000_000)
-            else
-                exceptions.die (2)
-            end
-        end
-
-    emit_arguments (a_arguments: ARGUMENTS_32)
-            -- Serialize child arguments without relying on delimiters alone.
-        local
-            index: INTEGER
-            value: STRING_32
-        do
-            from
-                index := 3
-            until
-                index > a_arguments.argument_count
-            loop
-                value := a_arguments.argument (index).to_string_32
-                io.put_character ('[')
-                io.put_integer (value.count)
-                io.put_character (']')
-                io.put_string (value.to_string_8)
-                index := index + 1
-            end
-        end
-
-    emit_large_output
-            -- Write enough bytes to both streams to detect sequential-drain deadlocks.
-        local
-            stdout_block: STRING_8
-            stderr_block: STRING_8
-            index: INTEGER
-        do
-            create stdout_block.make_filled ('o', large_block_size)
-            create stderr_block.make_filled ('e', large_block_size)
-            from
-                index := 1
-            until
-                index > large_block_count
-            loop
-                io.put_string (stdout_block)
-                io.error.put_string (stderr_block)
-                index := index + 1
-            end
+            assert_true ("termination finished", process.is_finished)
         end
 
 feature {NONE} -- Callback collection
@@ -267,6 +187,17 @@ feature {NONE} -- Callback collection
 
 feature {NONE} -- Support
 
+    process_child_executable: STRING
+            -- Path of the helper executable used as a child process.
+        do
+            if variables.has (process_child_variable) then
+                Result := variables.value (process_child_variable)
+            else
+                assert_true ("process child configured", False)
+                create Result.make_empty
+            end
+        end
+
     child_arguments (a_mode: READABLE_STRING_GENERAL): ARRAYED_LIST [READABLE_STRING_GENERAL]
             -- Arguments selecting child `a_mode`.
         do
@@ -275,28 +206,15 @@ feature {NONE} -- Support
             Result.extend (a_mode)
         end
 
-    assert (a_name: READABLE_STRING_8; a_condition: BOOLEAN)
-            -- Record whether named test condition `a_condition` holds.
-        do
-            if a_condition then
-                io.put_string ("PASS: ")
-                io.put_string (a_name)
-                io.put_new_line
-            else
-                failure_count := failure_count + 1
-                io.error.put_string ("FAIL: ")
-                io.error.put_string (a_name)
-                io.error.put_new_line
-            end
-        end
-
 feature {NONE} -- State
 
     callback_stdout: STRING_8
 
     callback_stderr: STRING_8
 
-    failure_count: INTEGER
+feature {NONE} -- Constants
+
+    process_child_variable: STRING = "process_child"
 
     large_block_size: INTEGER = 4096
 

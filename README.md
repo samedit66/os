@@ -10,9 +10,10 @@ Applications reference `os.ecf` directly:
 ```
 
 The configuration contains four targets: the `os` library target, the
-`application` example, `os_process_tests`, and `os_file_path_tests`. It does not
-reference nested project libraries; compiler-specific dependencies and backend
-clusters are selected directly by `os.ecf`.
+`application` example, the generated `os_tests` harness, and its
+`os_process_test_child` helper. It does not reference nested project libraries;
+compiler-specific dependencies and backend clusters are selected directly by
+`os.ecf`.
 
 The library has four public classes:
 
@@ -141,7 +142,8 @@ with `GOBO_EIFFEL=ge`; EiffelStudio uses the ISE backend.
 Required tools:
 
 - Gobo Eiffel 26.06.30 (`GOBO` points to its distribution; the Makefile
-  defaults to `$HOME/Projects/gobo`);
+  defaults to `$HOME/Projects/gobo`). Gobo also supplies `getest` and the test
+  harness when the tests are compiled with EiffelStudio;
 - EiffelStudio 25.02 or later (`ec` on `PATH`);
 - a C11 compiler and archiver for the native backend.
 
@@ -159,10 +161,12 @@ Override tool locations when needed:
 make gobo GEC=/path/to/gec GELINT=/path/to/gelint CC=clang
 ```
 
-The test commands run both the process and file-path suites. GitHub Actions has
-separate matrices for native C compilation, Gobo behavior on
-Ubuntu/macOS/Windows, and EiffelStudio behavior on Ubuntu/macOS/Windows. The C
-bridge is compiled with GCC, Clang, MSVC, and clang-cl.
+The test commands generate a Gobo Test harness in `build/testgen` and run the
+same process and file-path test cases with both Eiffel compilers. Generated
+sources are build artifacts and are not committed. GitHub Actions has separate
+matrices for native C compilation, Gobo behavior on Ubuntu/macOS/Windows, and
+EiffelStudio behavior on Ubuntu/macOS/Windows. The C bridge is compiled with
+GCC, Clang, MSVC, and clang-cl.
 
 ## Scope
 

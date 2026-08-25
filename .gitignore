@@ -5,6 +5,10 @@
 /os_process_example
 /os_process_tests
 /os_file_path_tests
+/os_process_test_child
+/os_process_test_child.exe
+/os_tests
+/os_tests.exe
 *.epr
 *.o
 *.obj

@@ -123,7 +123,7 @@ feature -- Test
             directory_link: OS_FILE_PATH
             missing_target: OS_FILE_PATH
             broken_link: OS_FILE_PATH
-            runner: OS_PROCESS_RUNNER
+            command: OS_COMMAND
             process_result: OS_PROCESS_RESULT
         do
             if not {PLATFORM}.is_windows then
@@ -133,8 +133,8 @@ feature -- Test
                 target_file := target_directory / "keep.txt"
                 target_file.write_text ("keep")
                 directory_link := root / "directory-link"
-                create runner
-                process_result := runner.run ("ln", link_arguments (target_directory, directory_link))
+                create command.make ("ln", link_arguments (target_directory, directory_link))
+                process_result := command.run
                 assert_true ("directory symlink created", process_result.successful and entry_exists (directory_link))
                 directory_link.delete_recursively
                 assert_false ("directory symlink removed", entry_exists (directory_link))
@@ -142,7 +142,8 @@ feature -- Test
 
                 missing_target := root / "missing-target"
                 broken_link := root / "broken-link"
-                process_result := runner.run ("ln", link_arguments (missing_target, broken_link))
+                create command.make ("ln", link_arguments (missing_target, broken_link))
+                process_result := command.run
                 assert_true ("broken symlink created", process_result.successful and entry_exists (broken_link))
                 assert_false ("broken symlink target absent", broken_link.exists)
                 broken_link.delete_recursively

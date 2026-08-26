@@ -44,8 +44,8 @@ The small public surface is organized around four classes:
 
 | Class | Purpose |
 | --- | --- |
-| `OS_PROCESS_RUNNER` | Starts a process or runs it to completion |
-| `OS_PROCESS_HANDLE` | Exposes a running process, captured output, and lifecycle operations |
+| `OS_COMMAND` | Describes an executable and argument vector and starts independent executions |
+| `OS_PROCESS` | Represents a running process and exposes its lifecycle and completed outcome |
 | `OS_PROCESS_RESULT` | Holds the exit code, standard output, and standard error of a completed run |
 | `OS_FILE_PATH` | Represents a path and provides common file and directory operations |
 
@@ -66,12 +66,12 @@ matrix:
 > backslashes preceding quotes may be passed to the child process incorrectly.
 > The `os` EiffelStudio backend works around this limitation using the Microsoft
 > C runtime argument-parsing rules. Callers should pass unescaped arguments to
-> `OS_PROCESS_RUNNER.run` and `start`; no application-level workaround is needed.
+> `OS_COMMAND.make`; no application-level workaround is needed.
 
 File-path operations use the common EiffelBase/FreeELKS `PATH`, `FILE_INFO`,
 `DIRECTORY`, and file classes. They do not need a compiler-specific backend.
 
-Platform differences remain explicit where they matter. `shell` uses
+Platform differences remain explicit where they matter. `make_shell` uses
 `/bin/sh -c` on POSIX systems and `COMSPEC` (falling back to `cmd.exe`) with
 `/D /S /C` on Windows. `terminate` maps to `SIGTERM` on POSIX and
 `TerminateProcess` on Windows.
@@ -111,27 +111,30 @@ cd vendor\os
 
 ### Run a process
 
-Create a runner, pass the executable and its arguments separately, and receive
-a typed result:
+Create a command from the executable and its argument vector, then run it to
+receive a typed result:
 
 ```eiffel
 local
-    runner: OS_PROCESS_RUNNER
-    result: OS_PROCESS_RESULT
+    command: OS_COMMAND
+    process_result: OS_PROCESS_RESULT
 do
-    create runner
-    result := runner.run ("git", << "status", "--short" >>)
+    create command.make ("git", << "status", "--short" >>)
+    process_result := command.run
 
-    if result.successful then
-        io.put_string (result.stdout)
+    if process_result.successful then
+        io.put_string (process_result.stdout)
     else
-        io.error.put_string (result.stderr)
+        io.error.put_string (process_result.stderr)
     end
 end
 ```
 
-`run` passes the argument vector directly to the child process. Spaces, quotes,
-backslashes, and empty arguments do not require shell escaping.
+`OS_COMMAND` copies the executable and every argument when it is created, so it
+can be reused for sequential or overlapping executions even if the caller later
+modifies the original strings or collection. `run` passes the stored argument
+vector directly to the child process. Spaces, quotes, backslashes, and empty
+arguments do not require shell escaping.
 
 ### Stream process output
 
@@ -140,34 +143,37 @@ control over the process lifecycle:
 
 ```eiffel
 local
-    runner: OS_PROCESS_RUNNER
-    process: OS_PROCESS_HANDLE
+    command: OS_COMMAND
+    process: OS_PROCESS
+    process_result: OS_PROCESS_RESULT
 do
-    create runner
-    process := runner.start (
-        "git",
-        << "status", "--short" >>,
+    create command.make ("git", << "status", "--short" >>)
+    process := command.start_with_handlers (
         agent on_stdout,
         agent on_stderr
     )
     process.wait
+    process_result := process.outcome
 end
 ```
 
-The handle provides `is_finished`, `wait`, `terminate`, `exit_code`, `stdout`,
-and `stderr`. Output callbacks may run concurrently and should return quickly;
-ordering is preserved within each stream, not between standard output and
-standard error. Both streams are exposed as raw `STRING_8` byte sequences; the
-library does not impose an output encoding.
+The process provides `is_finished`, `wait`, `terminate`, and `outcome`.
+`is_finished` becomes true only after the child and both output readers have
+finished, so `outcome` is then available without a separate `wait`. Output
+callbacks may run concurrently and should return quickly; ordering is preserved
+within each stream, not between standard output and standard error. Both streams
+are exposed as raw `STRING_8` byte sequences; the library does not impose an
+output encoding.
 
 For commands that intentionally require a shell, use the separate helper:
 
 ```eiffel
-result := runner.shell ("git --version")
+create command.make_shell ("git --version")
+process_result := command.run
 ```
 
 Shell syntax is platform-dependent. Do not concatenate untrusted input into a
-shell command; use `run` with an explicit argument vector instead.
+shell command; use `make` with an explicit argument vector instead.
 
 ### Work with paths
 

@@ -24,11 +24,10 @@ feature -- Test
     test_arguments
             -- Preserve spaces, quotes, backslashes, and an empty argument.
         local
-            runner: OS_PROCESS_RUNNER
+            command: OS_COMMAND
             process_result: OS_PROCESS_RESULT
             arguments: ARRAYED_LIST [READABLE_STRING_GENERAL]
         do
-            create runner
             create arguments.make (7)
             arguments.extend ("--child")
             arguments.extend ("arguments")
@@ -37,7 +36,8 @@ feature -- Test
             arguments.extend ("c\d")
             arguments.extend ("ends with slash\")
             arguments.extend ("")
-            process_result := runner.run (process_child_executable, arguments)
+            create command.make (process_child_executable, arguments)
+            process_result := command.run
             assert_integers_equal ("arguments exit", 0, process_result.exit_code)
             assert_strings_equal (
                 "arguments stdout",
@@ -50,11 +50,11 @@ feature -- Test
     test_nonzero_exit
             -- Return the child's nonzero exit status.
         local
-            runner: OS_PROCESS_RUNNER
+            command: OS_COMMAND
             process_result: OS_PROCESS_RESULT
         do
-            create runner
-            process_result := runner.run (process_child_executable, child_arguments ("exit-seven"))
+            create command.make (process_child_executable, child_arguments ("exit-seven"))
+            process_result := command.run
             assert_integers_equal ("nonzero exit", 7, process_result.exit_code)
             assert_false ("nonzero successful", process_result.successful)
         end
@@ -62,67 +62,67 @@ feature -- Test
     test_streaming_callbacks
             -- Capture each stream and forward the same bytes to its callback.
         local
-            runner: OS_PROCESS_RUNNER
-            process: OS_PROCESS_HANDLE
+            command: OS_COMMAND
+            process: OS_PROCESS
+            process_result: OS_PROCESS_RESULT
         do
             callback_stdout.wipe_out
             callback_stderr.wipe_out
-            create runner
-            process := runner.start (
-                process_child_executable,
-                child_arguments ("emit"),
+            create command.make (process_child_executable, child_arguments ("emit"))
+            process := command.start_with_handlers (
                 agent append_stdout,
                 agent append_stderr
             )
             process.wait
-            assert_integers_equal ("stream exit", 0, process.exit_code)
-            assert_strings_equal ("stream stdout", "stdout-data", process.stdout)
-            assert_strings_equal ("stream stderr", "stderr-data", process.stderr)
-            assert_strings_equal ("stdout callback", process.stdout, callback_stdout)
-            assert_strings_equal ("stderr callback", process.stderr, callback_stderr)
+            process_result := process.outcome
+            assert_integers_equal ("stream exit", 0, process_result.exit_code)
+            assert_strings_equal ("stream stdout", "stdout-data", process_result.stdout)
+            assert_strings_equal ("stream stderr", "stderr-data", process_result.stderr)
+            assert_strings_equal ("stdout callback", process_result.stdout, callback_stdout)
+            assert_strings_equal ("stderr callback", process_result.stderr, callback_stderr)
             assert_true ("stream finished", process.is_finished)
         end
 
     test_large_output
             -- Drain both pipes concurrently when each exceeds kernel pipe capacity.
         local
-            runner: OS_PROCESS_RUNNER
+            command: OS_COMMAND
             process_result: OS_PROCESS_RESULT
         do
-            create runner
-            process_result := runner.run (process_child_executable, child_arguments ("large"))
+            create command.make (process_child_executable, child_arguments ("large"))
+            process_result := command.run
             assert_integers_equal ("large exit", 0, process_result.exit_code)
             assert_integers_equal ("large stdout", large_block_size * large_block_count, process_result.stdout.count)
             assert_integers_equal ("large stderr", large_block_size * large_block_count, process_result.stderr.count)
         end
 
     test_wait_is_idempotent
-            -- Permit clients to wait on a completed handle more than once.
+            -- Permit clients to wait on a completed process more than once.
         local
-            runner: OS_PROCESS_RUNNER
-            process: OS_PROCESS_HANDLE
+            command: OS_COMMAND
+            process: OS_PROCESS
             first_output: STRING_8
         do
-            create runner
-            process := runner.start (process_child_executable, child_arguments ("emit"), Void, Void)
+            create command.make (process_child_executable, child_arguments ("emit"))
+            process := command.start
             process.wait
-            first_output := process.stdout
+            first_output := process.outcome.stdout
             process.wait
-            assert_integers_equal ("second wait exit", 0, process.exit_code)
-            assert_strings_equal ("second wait output", first_output, process.stdout)
+            assert_integers_equal ("second wait exit", 0, process.outcome.exit_code)
+            assert_strings_equal ("second wait output", first_output, process.outcome.stdout)
         end
 
     test_missing_command
             -- Represent a missing executable as the conventional launch failure.
         local
-            runner: OS_PROCESS_RUNNER
+            command: OS_COMMAND
             process_result: OS_PROCESS_RESULT
         do
-            create runner
-            process_result := runner.run (
+            create command.make (
                 "os-process-command-that-must-not-exist-4f27a5b2",
                 create {ARRAYED_LIST [READABLE_STRING_GENERAL]}.make (0)
             )
+            process_result := command.run
             assert_integers_equal ("missing command", 127, process_result.exit_code)
             assert_true ("missing stdout", process_result.stdout.is_empty)
             assert_true ("missing stderr", process_result.stderr.is_empty)
@@ -131,33 +131,33 @@ feature -- Test
     test_path_lookup
             -- Find a simple executable name through PATH without invoking a shell.
         local
-            runner: OS_PROCESS_RUNNER
+            command: OS_COMMAND
             process_result: OS_PROCESS_RESULT
             arguments: ARRAYED_LIST [READABLE_STRING_GENERAL]
         do
-            create runner
             create arguments.make (1)
             arguments.extend ("--version")
-            process_result := runner.run ("git", arguments)
+            create command.make ("git", arguments)
+            process_result := command.run
             assert_integers_equal ("PATH lookup", 0, process_result.exit_code)
         end
 
     test_shell
             -- Interpret command chaining and redirection through the platform shell.
         local
-            runner: OS_PROCESS_RUNNER
+            command: OS_COMMAND
             process_result: OS_PROCESS_RESULT
         do
-            create runner
             if {PLATFORM}.is_windows then
-                process_result := runner.shell (
+                create command.make_shell (
                     "echo shell-stdout&echo shell-stderr 1>&2&exit /b 9"
                 )
             else
-                process_result := runner.shell (
+                create command.make_shell (
                     "printf shell-stdout; printf shell-stderr >&2; exit 9"
                 )
             end
+            process_result := command.run
             assert_integers_equal ("shell exit", 9, process_result.exit_code)
             assert_true ("shell stdout", process_result.stdout.has_substring ("shell-stdout"))
             assert_true ("shell stderr", process_result.stderr.has_substring ("shell-stderr"))
@@ -166,14 +166,117 @@ feature -- Test
     test_termination
             -- Request termination and still allow normal wait/cleanup.
         local
-            runner: OS_PROCESS_RUNNER
-            process: OS_PROCESS_HANDLE
+            command: OS_COMMAND
+            process: OS_PROCESS
         do
-            create runner
-            process := runner.start (process_child_executable, child_arguments ("sleep"), Void, Void)
+            create command.make (process_child_executable, child_arguments ("sleep"))
+            process := command.start
             process.terminate
             process.wait
             assert_true ("termination finished", process.is_finished)
+        end
+
+    test_command_copies_inputs
+            -- Keep a private snapshot of the executable and argument data.
+        local
+            command: OS_COMMAND
+            process_result: OS_PROCESS_RESULT
+            arguments: ARRAYED_LIST [READABLE_STRING_GENERAL]
+            mutable_executable: STRING_32
+            mutable_argument: STRING_32
+        do
+            create mutable_executable.make_from_string_general (process_child_executable)
+            create mutable_argument.make_from_string_general ("before")
+            create arguments.make (3)
+            arguments.extend ("--child")
+            arguments.extend ("arguments")
+            arguments.extend (mutable_argument)
+            create command.make (mutable_executable, arguments)
+
+            mutable_executable.wipe_out
+            mutable_argument.replace_substring_all ("before", "after")
+            arguments.wipe_out
+
+            process_result := command.run
+            assert_integers_equal ("copied arguments exit", 0, process_result.exit_code)
+            assert_strings_equal ("copied arguments stdout", "[6]before", process_result.stdout)
+        end
+
+    test_repeated_command
+            -- Run one command object more than once.
+        local
+            command: OS_COMMAND
+            first_result: OS_PROCESS_RESULT
+            second_result: OS_PROCESS_RESULT
+        do
+            create command.make (process_child_executable, child_arguments ("emit"))
+            first_result := command.run
+            second_result := command.run
+            assert_strings_equal ("first repeated output", "stdout-data", first_result.stdout)
+            assert_strings_equal ("second repeated output", first_result.stdout, second_result.stdout)
+        end
+
+    test_run_matches_started_outcome
+            -- Return the same outcome through synchronous and asynchronous execution.
+        local
+            command: OS_COMMAND
+            process: OS_PROCESS
+            run_result: OS_PROCESS_RESULT
+            started_result: OS_PROCESS_RESULT
+        do
+            create command.make (process_child_executable, child_arguments ("emit"))
+            run_result := command.run
+            process := command.start
+            process.wait
+            started_result := process.outcome
+            assert_integers_equal ("matching exit", run_result.exit_code, started_result.exit_code)
+            assert_strings_equal ("matching stdout", run_result.stdout, started_result.stdout)
+            assert_strings_equal ("matching stderr", run_result.stderr, started_result.stderr)
+        end
+
+    test_overlapping_command_starts
+            -- Keep overlapping executions of one command independent.
+        local
+            command: OS_COMMAND
+            first_process: OS_PROCESS
+            second_process: OS_PROCESS
+        do
+            create command.make (process_child_executable, child_arguments ("emit"))
+            first_process := command.start
+            second_process := command.start
+            first_process.wait
+            second_process.wait
+            assert_strings_equal ("first overlapping output", "stdout-data", first_process.outcome.stdout)
+            assert_strings_equal ("second overlapping output", "stdout-data", second_process.outcome.stdout)
+        end
+
+    test_polled_result
+            -- Make the complete result available through polling alone.
+        local
+            command: OS_COMMAND
+            process: OS_PROCESS
+            environment: EXECUTION_ENVIRONMENT
+            attempts: INTEGER
+        do
+            create command.make (process_child_executable, child_arguments ("emit"))
+            process := command.start
+            create environment
+            from
+            until
+                process.is_finished or attempts = polling_attempt_limit
+            loop
+                environment.sleep (polling_interval)
+                attempts := attempts + 1
+            end
+            if process.is_finished then
+                assert_integers_equal ("polled exit", 0, process.outcome.exit_code)
+                assert_strings_equal ("polled stdout", "stdout-data", process.outcome.stdout)
+                assert_strings_equal ("polled stderr", "stderr-data", process.outcome.stderr)
+            else
+                process.terminate
+                process.wait
+                assert_true ("polling completed", False)
+            end
         end
 
 feature {NONE} -- Callback collection
@@ -224,5 +327,9 @@ feature {NONE} -- Constants
     large_block_size: INTEGER = 4096
 
     large_block_count: INTEGER = 128
+
+    polling_attempt_limit: INTEGER = 5_000
+
+    polling_interval: INTEGER_64 = 1_000_000
 
 end

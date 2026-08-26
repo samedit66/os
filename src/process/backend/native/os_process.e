@@ -1,7 +1,7 @@
 class
-    OS_PROCESS_HANDLE
+    OS_PROCESS
 
-create {OS_PROCESS_RUNNER}
+create {OS_COMMAND}
     make
 
 feature {NONE} -- Initialization
@@ -22,7 +22,6 @@ feature {NONE} -- Initialization
             err_reader: OS_PROCESS_PIPE_READER
             offset: INTEGER
         do
-            exit_code := -1
             create stdout_snapshot.make_empty
             create stderr_snapshot.make_empty
             create executable_c.make (utf_8 (a_executable))
@@ -43,8 +42,9 @@ feature {NONE} -- Initialization
             native_handle := c_start (executable_c.item, argument_vector.item, error_area.item)
             if native_handle = default_pointer then
                 if c_is_command_error (error_area.read_integer_32 (0)) then
-                    exit_code := command_launch_failure
-                    finished := True
+                    exit_status := command_launch_failure
+                    process_exited := True
+                    complete
                 else
                     raise_native_failure ("Cannot start process", error_area.read_integer_32 (0))
                 end
@@ -56,63 +56,42 @@ feature {NONE} -- Initialization
                 out_reader.launch
                 err_reader.launch
             end
+        ensure
+            missing_process_has_result: native_handle = default_pointer implies is_finished
         end
 
 feature -- Access
 
-    exit_code: INTEGER
-            -- Child exit code; -1 while running.
-
-    stdout: STRING_8
-            -- Captured standard-output bytes.
+    outcome: OS_PROCESS_RESULT
+            -- Completed execution outcome.
+        require
+            finished: is_finished
         do
-            if attached stdout_reader as reader and then finished then
-                Result := reader.output.to_string_8
-            else
-                Result := stdout_snapshot.to_string_8
-            end
-        end
-
-    stderr: STRING_8
-            -- Captured standard-error bytes.
-        do
-            if attached stderr_reader as reader and then finished then
-                Result := reader.output.to_string_8
-            else
-                Result := stderr_snapshot.to_string_8
+            check attached process_result as completed_outcome then
+                Result := completed_outcome
             end
         end
 
 feature -- Status report
 
     is_finished: BOOLEAN
-            -- Has the child completed?
-            -- Polling may reap an exited native child and cache its status.
-        local
-            finished_area: MANAGED_POINTER
-            exit_area: MANAGED_POINTER
-            status: INTEGER
+            -- Is execution complete and its result available?
         do
-            if finished then
-                Result := True
-            elseif native_handle /= default_pointer then
-                create finished_area.make ({PLATFORM}.integer_32_bytes)
-                create exit_area.make ({PLATFORM}.integer_32_bytes)
-                status := c_poll (native_handle, finished_area.item, exit_area.item)
-                if status /= 0 then
-                    raise_native_failure ("Cannot poll process", status)
-                elseif finished_area.read_integer_32 (0) /= 0 then
-                    exit_code := exit_area.read_integer_32 (0)
-                    process_exited := True
-                    Result := True
+            if not finished then
+                poll_process
+                if process_exited and then readers_finished then
+                    complete
                 end
             end
+            Result := finished
+        ensure
+            result_available: Result implies attached process_result
         end
 
 feature -- Basic operations
 
     wait
-            -- Wait for the child and both pipe readers.
+            -- Wait for execution and output collection to complete.
         local
             exit_area: MANAGED_POINTER
             status: INTEGER
@@ -124,26 +103,13 @@ feature -- Basic operations
                     if status /= 0 then
                         raise_native_failure ("Cannot wait for process", status)
                     end
-                    exit_code := exit_area.read_integer_32 (0)
+                    exit_status := exit_area.read_integer_32 (0)
                     process_exited := True
                 end
-                if attached stdout_reader as out_reader then
-                    out_reader.join
-                    stdout_snapshot := out_reader.output.to_string_8
-                end
-                if attached stderr_reader as err_reader then
-                    err_reader.join
-                    stderr_snapshot := err_reader.output.to_string_8
-                end
-                c_free (native_handle)
-                native_handle := default_pointer
-                finished := True
+                join_readers
+                complete
             end
-            if attached stdout_reader as out_reader and then out_reader.has_failed then
-                raise_reader_failure
-            elseif attached stderr_reader as err_reader and then err_reader.has_failed then
-                raise_reader_failure
-            end
+            report_reader_failure
         ensure
             finished: is_finished
         end
@@ -161,6 +127,75 @@ feature -- Basic operations
             end
         end
 
+feature {NONE} -- Completion
+
+    poll_process
+            -- Poll the child and retain its status when it has exited.
+        local
+            finished_area: MANAGED_POINTER
+            exit_area: MANAGED_POINTER
+            status: INTEGER
+        do
+            if not process_exited and then native_handle /= default_pointer then
+                create finished_area.make ({PLATFORM}.integer_32_bytes)
+                create exit_area.make ({PLATFORM}.integer_32_bytes)
+                status := c_poll (native_handle, finished_area.item, exit_area.item)
+                if status /= 0 then
+                    raise_native_failure ("Cannot poll process", status)
+                elseif finished_area.read_integer_32 (0) /= 0 then
+                    exit_status := exit_area.read_integer_32 (0)
+                    process_exited := True
+                end
+            end
+        end
+
+    readers_finished: BOOLEAN
+            -- Have both output readers finished?
+        do
+            Result :=
+                (not attached stdout_reader as out_reader or else out_reader.is_finished) and then
+                (not attached stderr_reader as err_reader or else err_reader.is_finished)
+        end
+
+    join_readers
+            -- Wait for both output readers.
+        do
+            if attached stdout_reader as out_reader then
+                out_reader.join
+            end
+            if attached stderr_reader as err_reader then
+                err_reader.join
+            end
+        ensure
+            finished: readers_finished
+        end
+
+    complete
+            -- Capture the completed outcome and release the native process.
+        require
+            process_exited: process_exited
+            readers_finished: readers_finished
+        do
+            if not finished then
+                if attached stdout_reader as out_reader then
+                    stdout_snapshot := out_reader.output.to_string_8
+                end
+                if attached stderr_reader as err_reader then
+                    stderr_snapshot := err_reader.output.to_string_8
+                end
+                if native_handle /= default_pointer then
+                    c_free (native_handle)
+                    native_handle := default_pointer
+                end
+                create process_result.make (exit_status, stdout_snapshot, stderr_snapshot)
+                finished := True
+            end
+        ensure
+            finished: finished
+            result_available: attached process_result
+            handle_released: native_handle = default_pointer
+        end
+
 feature {NONE} -- Conversion
 
     utf_8 (a_text: READABLE_STRING_GENERAL): STRING_8
@@ -171,8 +206,18 @@ feature {NONE} -- Conversion
 
 feature {NONE} -- Error handling
 
-    raise_reader_failure
+    report_reader_failure
             -- Report a read or callback failure after draining both streams.
+        do
+            if attached stdout_reader as out_reader and then out_reader.has_failed then
+                raise_reader_failure
+            elseif attached stderr_reader as err_reader and then err_reader.has_failed then
+                raise_reader_failure
+            end
+        end
+
+    raise_reader_failure
+            -- Report a process pipe reader failure.
         do
             (create {EXCEPTIONS}).raise ("A process pipe reader failed")
         end
@@ -220,6 +265,10 @@ feature {NONE} -- Implementation
     stdout_snapshot: STRING_8
 
     stderr_snapshot: STRING_8
+
+    process_result: detachable OS_PROCESS_RESULT
+
+    exit_status: INTEGER
 
     process_exited: BOOLEAN
 

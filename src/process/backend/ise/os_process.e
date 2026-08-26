@@ -1,7 +1,7 @@
 class
-    OS_PROCESS_HANDLE
+    OS_PROCESS
 
-create {OS_PROCESS_RUNNER}
+create {OS_COMMAND}
     make
 
 feature {NONE} -- Initialization
@@ -15,29 +15,94 @@ feature {NONE} -- Initialization
             -- Launch an EiffelStudio `PROCESS`.
         local
             factory: PROCESS_FACTORY
-            executable: READABLE_STRING_GENERAL
+            executable_name: READABLE_STRING_GENERAL
         do
             create stdout_buffer.make_empty
             create stderr_buffer.make_empty
             stdout_handler := a_stdout
             stderr_handler := a_stderr
-            exit_code := -1
             create factory
-            executable := resolved_executable (a_executable)
+            executable_name := resolved_executable (a_executable)
             if {PLATFORM}.is_windows then
                 implementation := factory.process_launcher_with_command_line (
-                    windows_command_line (executable, a_arguments), Void
+                    windows_command_line (executable_name, a_arguments), Void
                 )
             else
-                implementation := factory.process_launcher (executable, a_arguments, Void)
+                implementation := factory.process_launcher (executable_name, a_arguments, Void)
             end
             implementation.redirect_output_to_agent (agent receive_stdout)
             implementation.redirect_error_to_agent (agent receive_stderr)
             implementation.launch
             if not implementation.launched then
-                exit_code := command_launch_failure
+                exit_status := command_launch_failure
+                complete
+            end
+        ensure
+            missing_process_has_result: not implementation.launched implies is_finished
+        end
+
+feature -- Access
+
+    outcome: OS_PROCESS_RESULT
+            -- Completed execution outcome.
+        require
+            finished: is_finished
+        do
+            check attached process_result as completed_outcome then
+                Result := completed_outcome
+            end
+        end
+
+feature -- Status report
+
+    is_finished: BOOLEAN
+            -- Is execution complete and its result available?
+        do
+            if not finished and then implementation.has_exited then
+                complete
+            end
+            Result := finished
+        ensure
+            result_available: Result implies attached process_result
+        end
+
+feature -- Basic operations
+
+    wait
+            -- Wait for execution and output collection to complete.
+        do
+            if not finished then
+                complete
+            end
+            report_callback_failure
+        ensure
+            finished: is_finished
+        end
+
+    terminate
+            -- Request platform-dependent child termination.
+        do
+            if not is_finished then
+                implementation.terminate
+            end
+        end
+
+feature {NONE} -- Completion
+
+    complete
+            -- Wait for output delivery and capture the completed outcome.
+        do
+            if not finished then
+                if implementation.launched then
+                    implementation.wait_for_exit
+                    exit_status := implementation.exit_code
+                end
+                create process_result.make (exit_status, stdout_buffer, stderr_buffer)
                 finished := True
             end
+        ensure
+            finished: finished
+            result_available: attached process_result
         end
 
 feature {NONE} -- Executable lookup
@@ -163,56 +228,6 @@ feature {NONE} -- Windows arguments
             end
         end
 
-feature -- Access
-
-    exit_code: INTEGER
-            -- Child exit code; -1 while running.
-
-    stdout: STRING_8
-            -- Captured standard-output bytes.
-        do
-            Result := stdout_buffer.to_string_8
-        end
-
-    stderr: STRING_8
-            -- Captured standard-error bytes.
-        do
-            Result := stderr_buffer.to_string_8
-        end
-
-feature -- Status report
-
-    is_finished: BOOLEAN
-            -- Has the child completed?
-        do
-            Result := finished or else implementation.has_exited
-        end
-
-feature -- Basic operations
-
-    wait
-            -- Wait for the child and all output callbacks.
-        do
-            if not finished then
-                implementation.wait_for_exit
-                exit_code := implementation.exit_code
-                finished := True
-            end
-            if stdout_callback_failed or stderr_callback_failed then
-                raise_callback_failure
-            end
-        ensure
-            finished: is_finished
-        end
-
-    terminate
-            -- Request platform-dependent child termination.
-        do
-            if not is_finished then
-                implementation.terminate
-            end
-        end
-
 feature {NONE} -- Callback handling
 
     receive_stdout (a_chunk: READABLE_STRING_8)
@@ -241,10 +256,12 @@ feature {NONE} -- Callback handling
             stderr_callback_failed := True
         end
 
-    raise_callback_failure
+    report_callback_failure
             -- Report a callback failure after both streams are drained.
         do
-            (create {EXCEPTIONS}).raise ("A process output callback failed")
+            if stdout_callback_failed or stderr_callback_failed then
+                (create {EXCEPTIONS}).raise ("A process output callback failed")
+            end
         end
 
 feature {NONE} -- Implementation
@@ -258,6 +275,10 @@ feature {NONE} -- Implementation
     stdout_handler: detachable PROCEDURE [READABLE_STRING_8]
 
     stderr_handler: detachable PROCEDURE [READABLE_STRING_8]
+
+    process_result: detachable OS_PROCESS_RESULT
+
+    exit_status: INTEGER
 
     stdout_callback_failed: BOOLEAN
 

@@ -9,20 +9,20 @@ feature {NONE} -- Initialization
     make
             -- Run a small streaming example.
         local
-            runner: OS_PROCESS_RUNNER
-            process: OS_PROCESS_HANDLE
+            command: OS_COMMAND
+            process: OS_PROCESS
+            process_result: OS_PROCESS_RESULT
         do
-            create runner
-            process := runner.start (
-                "git",
-                << "--version" >>,
+            create command.make ("git", << "--version" >>)
+            process := command.start_with_handlers (
                 agent on_stdout,
                 agent on_stderr
             )
             process.wait
+            process_result := process.outcome
 
             io.put_string ("Exit code: ")
-            io.put_integer (process.exit_code)
+            io.put_integer (process_result.exit_code)
             io.put_new_line
         end
 

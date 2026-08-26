@@ -1,7 +1,7 @@
 class
     OS_PROCESS_PIPE_READER
 
-create {OS_PROCESS_HANDLE}
+create {OS_PROCESS}
     make
 
 feature {NONE} -- Initialization
@@ -22,12 +22,18 @@ feature {NONE} -- Initialization
             create worker.make (agent read_loop)
         end
 
-feature {OS_PROCESS_HANDLE} -- Access
+feature {OS_PROCESS} -- Access
 
     output: STRING_8
             -- Bytes captured by this reader.
 
-feature {OS_PROCESS_HANDLE} -- Status report
+feature {OS_PROCESS} -- Status report
+
+    is_finished: BOOLEAN
+            -- Has the reader thread terminated?
+        do
+            Result := worker.terminated
+        end
 
     has_failed: BOOLEAN
             -- Did a native read or user callback fail?
@@ -35,7 +41,7 @@ feature {OS_PROCESS_HANDLE} -- Status report
             Result := read_failed or callback_failed
         end
 
-feature {OS_PROCESS_HANDLE} -- Basic operations
+feature {OS_PROCESS} -- Basic operations
 
     launch
             -- Launch the Eiffel reader thread.

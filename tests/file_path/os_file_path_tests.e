@@ -279,28 +279,24 @@ feature -- Test
             directory_link: OS_FILE_PATH
             missing_target: OS_FILE_PATH
             broken_link: OS_FILE_PATH
-            command: OS_COMMAND
-            process_result: OS_PROCESS_RESULT
         do
             if not {PLATFORM}.is_windows then
                 root := current_test_root
-                target_directory := root / "link-target"
+                target_directory := root / "link target's"
                 target_directory.create_directory
                 target_file := target_directory / "keep.txt"
                 target_file.write_text ("keep")
-                directory_link := root / "directory-link"
-                create command.make ("ln", link_arguments (target_directory, directory_link))
-                process_result := command.run
-                assert_true ("directory symlink created", process_result.successful and entry_exists (directory_link))
+                directory_link := root / "directory link's"
+                create_symbolic_link (target_directory, directory_link)
+                assert_true ("directory symlink created", entry_exists (directory_link))
                 directory_link.delete_recursively
                 assert_false ("directory symlink removed", entry_exists (directory_link))
                 assert_true ("symlink target retained", target_file.exists)
 
-                missing_target := root / "missing-target"
-                broken_link := root / "broken-link"
-                create command.make ("ln", link_arguments (missing_target, broken_link))
-                process_result := command.run
-                assert_true ("broken symlink created", process_result.successful and entry_exists (broken_link))
+                missing_target := root / "missing target's"
+                broken_link := root / "broken link's"
+                create_symbolic_link (missing_target, broken_link)
+                assert_true ("broken symlink created", entry_exists (broken_link))
                 assert_false ("broken symlink target absent", broken_link.exists)
                 broken_link.delete_recursively
                 assert_false ("broken symlink removed", entry_exists (broken_link))
@@ -389,13 +385,48 @@ feature {NONE} -- Support
             absent: not entry_exists (Result)
         end
 
-    link_arguments (a_target, a_link: OS_FILE_PATH): ARRAYED_LIST [READABLE_STRING_GENERAL]
-            -- Arguments for creating `a_link` to `a_target` with POSIX `ln`.
+    create_symbolic_link (a_target, a_link: OS_FILE_PATH)
+            -- Create POSIX symbolic link `a_link` to `a_target`.
+        require
+            supported_platform: not {PLATFORM}.is_windows
+        local
+            command: STRING_32
+            environment: EXECUTION_ENVIRONMENT
         do
-            create Result.make (3)
-            Result.extend ("-s")
-            Result.extend (a_target.name)
-            Result.extend (a_link.name)
+            create command.make_from_string_general ("ln -s ")
+            command.append (posix_shell_argument (a_target.name))
+            command.append_character (' ')
+            command.append (posix_shell_argument (a_link.name))
+            create environment
+            environment.system (command)
+            check command_succeeded: environment.return_code = 0 then end
+        ensure
+            link_exists: entry_exists (a_link)
+        end
+
+    posix_shell_argument (a_argument: READABLE_STRING_GENERAL): STRING_32
+            -- Single-quoted POSIX shell representation of `a_argument`.
+        local
+            index: INTEGER
+        do
+            create Result.make (a_argument.count + 2)
+            Result.append_character ('%'')
+            from
+                index := 1
+            until
+                index > a_argument.count
+            loop
+                if a_argument.item (index) = '%'' then
+                    Result.append_character ('%'')
+                    Result.append_character ('\')
+                    Result.append_character ('%'')
+                    Result.append_character ('%'')
+                else
+                    Result.append_code (a_argument.code (index))
+                end
+                index := index + 1
+            end
+            Result.append_character ('%'')
         end
 
     entry_exists (a_path: OS_FILE_PATH): BOOLEAN

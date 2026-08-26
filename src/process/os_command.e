@@ -46,10 +46,13 @@ feature -- Change
             input_set: input.same_string (a_input)
         end
 
-    set_working_directory (a_directory: OS_FILE_PATH)
+    set_working_directory (a_directory: READABLE_STRING_GENERAL)
             -- Use a normalized absolute snapshot of `a_directory` for subsequent executions.
+        local
+            directory_path: PATH
         do
-            working_directory := a_directory.normalized_absolute_path.name.to_string_32
+            create directory_path.make_from_string (a_directory)
+            working_directory := directory_path.canonical_path.name.to_string_32
         ensure
             working_directory_set: attached working_directory
         end

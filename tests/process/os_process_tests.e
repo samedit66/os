@@ -316,7 +316,7 @@ feature -- Test
                 process_child_executable,
                 child_arguments ("working-directory")
             )
-            command.set_working_directory (current_test_root)
+            command.set_working_directory (current_test_root.name)
             process_result := command.run
             assert_false ("missing directory not launched", process_result.was_launched)
             assert_integers_equal ("missing working directory", 127, process_result.exit_code)
@@ -476,33 +476,33 @@ feature -- Test
             process: OS_PROCESS
             first_result: OS_PROCESS_RESULT
             second_result: OS_PROCESS_RESULT
-            first_directory: OS_FILE_PATH
-            second_directory: OS_FILE_PATH
+            first_directory: PATH
+            second_directory: PATH
         do
-            first_directory := current_test_root / "first directory"
-            second_directory := current_test_root / "second directory"
-            first_directory.create_directory
-            second_directory.create_directory
+            first_directory := current_test_root.extended ("first directory")
+            second_directory := current_test_root.extended ("second directory")
+            create_directory (first_directory)
+            create_directory (second_directory)
             create command.make (
                 process_child_executable,
                 child_arguments ("working-directory")
             )
 
-            command.set_working_directory (first_directory)
+            command.set_working_directory (first_directory.name)
             process := command.start
-            command.set_working_directory (second_directory)
+            command.set_working_directory (second_directory.name)
             process.wait
             first_result := process.outcome
             second_result := command.run
 
             assert_readable_strings_equal (
                 "started working directory",
-                utf_8 (first_directory.normalized_absolute_path.name),
+                utf_8 (first_directory.canonical_path.name),
                 first_result.stdout
             )
             assert_readable_strings_equal (
                 "updated working directory",
-                utf_8 (second_directory.normalized_absolute_path.name),
+                utf_8 (second_directory.canonical_path.name),
                 second_result.stdout
             )
         end
@@ -512,24 +512,23 @@ feature -- Test
         local
             command: OS_COMMAND
             process: OS_PROCESS
-            relative_directory: OS_FILE_PATH
-            changed_directory: PATH
+            relative_directory: STRING_32
             environment: detachable EXECUTION_ENVIRONMENT
             original_directory: detachable PATH
             parent_changed: BOOLEAN
         do
-            current_test_root.create_directory
+            create_directory (current_test_root)
             create environment
             original_directory := environment.current_working_path
-            create relative_directory.make (".")
+            create relative_directory.make_from_string_general (".")
             create command.make (
                 process_child_executable,
                 child_arguments ("working-directory")
             )
             command.set_working_directory (relative_directory)
+            relative_directory.append ("-changed")
 
-            create changed_directory.make_from_string (current_test_root.name)
-            environment.change_working_path (changed_directory)
+            environment.change_working_path (current_test_root)
             parent_changed := environment.return_code = 0
             assert_true ("parent directory changed", parent_changed)
             process := command.start
@@ -690,7 +689,7 @@ feature {NONE} -- Support
             retry
         end
 
-    current_test_root: OS_FILE_PATH
+    current_test_root: PATH
             -- Root reserved for the current test.
         require
             test_root_attached: attached test_root
@@ -700,30 +699,54 @@ feature {NONE} -- Support
             end
         end
 
-    new_test_root: OS_FILE_PATH
+    new_test_root: PATH
             -- Unique absent path reserved for this test run.
         local
             environment: EXECUTION_ENVIRONMENT
             temporary_file: PLAIN_TEXT_FILE
             prefix: IMMUTABLE_STRING_32
-            root_path: PATH
         do
             create environment
             prefix := environment.current_working_path.extended ("os-process-tests-").name
             create temporary_file.make_open_temporary_with_prefix (prefix)
-            root_path := temporary_file.path
+            Result := temporary_file.path
             temporary_file.close
             temporary_file.delete
-            create Result.make_from_path (root_path)
         ensure
-            absent: not Result.exists
+            absent: not path_exists (Result)
+        end
+
+    create_directory (a_path: PATH)
+            -- Create `a_path`, including missing parents.
+        local
+            directory: DIRECTORY
+        do
+            create directory.make_with_path (a_path)
+            directory.recursive_create_dir
+        ensure
+            exists: path_exists (a_path)
+        end
+
+    path_exists (a_path: PATH): BOOLEAN
+            -- Does `a_path` denote an existing file-system entry?
+        local
+            file_info: FILE_INFO
+        do
+            create file_info.make
+            file_info.update (a_path.name)
+            Result := file_info.exists
         end
 
     cleanup
             -- Remove the test tree if one has been reserved.
+        local
+            directory: DIRECTORY
         do
             if attached test_root as root then
-                root.delete_recursively
+                create directory.make_with_path (root)
+                if directory.exists then
+                    directory.recursive_delete
+                end
                 test_root := Void
             end
         ensure
@@ -753,7 +776,7 @@ feature {NONE} -- State
 
     callback_call_count: INTEGER
 
-    test_root: detachable OS_FILE_PATH
+    test_root: detachable PATH
 
 feature {NONE} -- Constants
 

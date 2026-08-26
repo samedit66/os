@@ -43,14 +43,28 @@ git submodule add https://github.com/samedit66/os.git vendor/os
 git submodule update --init
 ```
 
-Reference it from the consuming project's ECF file:
+Reference the complete package from the consuming project's ECF file:
 
 ```xml
 <library name="os" location="./vendor/os/os.ecf" readonly="true"/>
 ```
 
-The native process library is required by both Eiffel compilers. Build it on
-Linux or macOS before compiling the client:
+The umbrella configuration imports both public modules. Clients that need only
+file and path operations can avoid the thread library, native archive, and C
+toolchain by importing `file_path.ecf` directly:
+
+```xml
+<library name="os_file_path" location="./vendor/os/file_path.ecf" readonly="true"/>
+```
+
+Process-only clients can import `process.ecf`:
+
+```xml
+<library name="os_process" location="./vendor/os/process.ecf" readonly="true"/>
+```
+
+The process module and the complete package require the native process
+library. Build it on Linux or macOS before compiling the client:
 
 ```console
 make -C vendor/os native
@@ -94,6 +108,18 @@ Set optional input or a working directory before calling `run` or `start`:
 command.set_working_directory ("/path/to/repository")
 command.set_input ("input bytes%N")
 ```
+
+`set_working_directory` accepts a `READABLE_STRING_GENERAL` and stores a
+normalized absolute snapshot immediately. When using `OS_FILE_PATH`, pass its
+name explicitly:
+
+```eiffel
+command.set_working_directory (directory.name)
+```
+
+This string-based parameter replaces the earlier direct `OS_FILE_PATH`
+parameter so that the process module remains independent of the file-path
+module.
 
 Use `start_with_handlers` to receive output while a process runs. See the
 complete [streaming example](src/application.e).

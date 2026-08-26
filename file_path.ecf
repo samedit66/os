@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<system xmlns="http://www.eiffel.com/developers/xml/configuration-1-23-0"
+    name="os_file_path"
+    uuid="038AF496-291D-4B1E-A3C0-56F4B37D2B7C"
+    library_target="os_file_path">
+    <target name="os_file_path">
+        <root all_classes="true"/>
+        <capability>
+            <void_safety support="all" use="all"/>
+        </capability>
+        <library name="gobo_free_elks" location="${GOBO}/library/free_elks/library_${GOBO_EIFFEL}.ecf">
+            <condition><custom name="GOBO_EIFFEL" value="ge"/></condition>
+        </library>
+        <library name="ise_base" location="$ISE_LIBRARY/library/base/base.ecf">
+            <condition><custom name="GOBO_EIFFEL" excluded_value="ge"/></condition>
+        </library>
+        <cluster name="file_path" location="src/file_path" recursive="false"/>
+    </target>
+    <target name="os_file_path_tests" extends="os_file_path">
+        <root class="OS_FILE_PATH_TEST_SUITE" feature="make"/>
+        <setting name="console_application" value="true"/>
+        <setting name="executable_name" value="os_file_path_tests"/>
+        <capability>
+            <concurrency support="thread" use="thread"/>
+        </capability>
+        <library name="ise_thread" location="$ISE_LIBRARY/library/thread/thread.ecf">
+            <condition><custom name="GOBO_EIFFEL" excluded_value="ge"/></condition>
+        </library>
+        <library name="gobo_thread" location="${GOBO}/library/thread/library_${GOBO_EIFFEL}.ecf">
+            <condition><custom name="GOBO_EIFFEL" value="ge"/></condition>
+        </library>
+        <library name="gobo_test" location="${GOBO}/library/test/library_skl.ecf" readonly="true"/>
+        <library name="gobo_regexp" location="${GOBO}/library/regexp/library.ecf" readonly="true"/>
+        <cluster name="file_path_tests" location="tests/file_path" recursive="false"/>
+        <cluster name="file_path_testgen" location="build/testgen/file_path" recursive="false"/>
+    </target>
+</system>

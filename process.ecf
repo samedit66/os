@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <system xmlns="http://www.eiffel.com/developers/xml/configuration-1-23-0"
-    name="os"
-    uuid="3DA4BABF-D8D3-4839-8AF7-EF8CB31819C2"
-    library_target="os">
-    <target name="os">
+    name="os_process"
+    uuid="35B8909C-8467-4AA9-BD7F-EA5AA6A350A6"
+    library_target="os_process">
+    <target name="os_process">
         <root all_classes="true"/>
         <capability>
             <concurrency support="thread"/>
@@ -21,38 +21,39 @@
         <library name="gobo_thread" location="${GOBO}/library/thread/library_${GOBO_EIFFEL}.ecf">
             <condition><custom name="GOBO_EIFFEL" value="ge"/></condition>
         </library>
-        <library name="os_process" location="process.ecf" readonly="true"/>
-        <library name="os_file_path" location="file_path.ecf" readonly="true"/>
+        <external_include location="$ECF_CONFIG_PATH/c"/>
+        <external_library location="$ECF_CONFIG_PATH/build/native/libos_process.a">
+            <condition>
+                <platform excluded_value="windows"/>
+            </condition>
+        </external_library>
+        <external_library location="$ECF_CONFIG_PATH/build/native/os_process.lib">
+            <condition>
+                <platform value="windows"/>
+            </condition>
+        </external_library>
+        <cluster name="process" location="src/process" recursive="false"/>
+        <cluster name="process_native" location="src/process/backend/native" recursive="true"/>
     </target>
-    <target name="application" extends="os">
-        <root class="APPLICATION" feature="make"/>
-        <setting name="console_application" value="true"/>
-        <setting name="executable_name" value="os_process_example"/>
-        <capability>
-            <concurrency support="thread" use="thread"/>
-        </capability>
-        <cluster name="example" location="src" recursive="false"/>
-    </target>
-    <target name="os_process_test_child" extends="os">
+    <target name="os_process_test_child" extends="os_process">
         <root class="OS_PROCESS_TEST_CHILD" feature="make"/>
         <setting name="console_application" value="true"/>
         <setting name="executable_name" value="os_process_test_child"/>
         <capability>
             <concurrency support="thread" use="thread"/>
         </capability>
-        <cluster name="test_support" location="tests/process/support" recursive="false"/>
+        <cluster name="process_test_support" location="tests/process/support" recursive="false"/>
     </target>
-    <target name="os_tests" extends="os">
-        <root class="OS_TESTS" feature="make"/>
+    <target name="os_process_tests" extends="os_process">
+        <root class="OS_PROCESS_TEST_SUITE" feature="make"/>
         <setting name="console_application" value="true"/>
-        <setting name="executable_name" value="os_tests"/>
+        <setting name="executable_name" value="os_process_tests"/>
         <capability>
             <concurrency support="thread" use="thread"/>
         </capability>
         <library name="gobo_test" location="${GOBO}/library/test/library_skl.ecf" readonly="true"/>
         <library name="gobo_regexp" location="${GOBO}/library/regexp/library.ecf" readonly="true"/>
-        <cluster name="file_path_tests" location="tests/file_path" recursive="false"/>
         <cluster name="process_tests" location="tests/process" recursive="false"/>
-        <cluster name="testgen" location="build/testgen" recursive="false"/>
+        <cluster name="process_testgen" location="build/testgen/process" recursive="false"/>
     </target>
 </system>

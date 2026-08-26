@@ -63,20 +63,20 @@ feature -- Test
             general: READABLE_STRING_GENERAL
         do
             converted := "literal/path"
-            assert_true ("literal", converted.name.same_string_general ("literal/path"))
+            assert_true ("literal", converted.name.same_string (expected_path_name ("literal/path")))
 
             string_8 := "eight-bit/path"
             converted := string_8
-            assert_true ("string 8", converted.name.same_string_general (string_8))
+            assert_true ("string 8", converted.name.same_string (expected_path_name (string_8)))
 
             string_32 := {STRING_32} "каталог/файл"
             converted := string_32
-            assert_true ("string 32", converted.name.same_string_general (string_32))
+            assert_true ("string 32", converted.name.same_string (expected_path_name (string_32)))
 
             general := string_32
             converted := general
-            assert_true ("readable string general", converted.name.same_string_general (general))
-            assert_true ("argument", path_name ("argument/path").same_string_general ("argument/path"))
+            assert_true ("readable string general", converted.name.same_string (expected_path_name (general)))
+            assert_true ("argument", path_name ("argument/path").same_string (expected_path_name ("argument/path")))
         end
 
     test_missing_entry
@@ -197,6 +197,15 @@ feature {NONE} -- Support
     path_name (a_path: OS_FILE_PATH): IMMUTABLE_STRING_32
             -- Name of `a_path`.
         do
+            Result := a_path.name
+        end
+
+    expected_path_name (a_name: READABLE_STRING_GENERAL): IMMUTABLE_STRING_32
+            -- Native path representation of `a_name`.
+        local
+            a_path: PATH
+        do
+            create a_path.make_from_string (a_name)
             Result := a_path.name
         end
 

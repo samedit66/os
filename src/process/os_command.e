@@ -47,9 +47,9 @@ feature -- Change
         end
 
     set_working_directory (a_directory: OS_FILE_PATH)
-            -- Use a canonical snapshot of `a_directory` for subsequent executions.
+            -- Use a normalized absolute snapshot of `a_directory` for subsequent executions.
         do
-            working_directory := a_directory.canonical_path.name.to_string_32
+            working_directory := a_directory.normalized_absolute_path.name.to_string_32
         ensure
             working_directory_set: attached working_directory
         end

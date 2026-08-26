@@ -497,12 +497,12 @@ feature -- Test
 
             assert_readable_strings_equal (
                 "started working directory",
-                utf_8 (first_directory.canonical_path.name),
+                utf_8 (first_directory.normalized_absolute_path.name),
                 first_result.stdout
             )
             assert_readable_strings_equal (
                 "updated working directory",
-                utf_8 (second_directory.canonical_path.name),
+                utf_8 (second_directory.normalized_absolute_path.name),
                 second_result.stdout
             )
         end

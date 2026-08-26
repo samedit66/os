@@ -35,8 +35,8 @@ feature -- Test
             from_string: OS_FILE_PATH
             from_path: OS_FILE_PATH
             nested: OS_FILE_PATH
-            canonical: OS_FILE_PATH
-            canonical_base: PATH
+            normalized: OS_FILE_PATH
+            normalized_base: PATH
         do
             root := current_test_root
             create base_path.make_from_string (root.name)
@@ -48,10 +48,14 @@ feature -- Test
             nested := (root / "one") / "two.txt"
             assert_equal ("extended parent", (root / "one").name, nested.parent.name)
 
-            canonical := ((root / "one") / "..").canonical_path
-            create canonical_base.make_from_string (canonical.name)
-            assert_true ("canonical path absolute", canonical_base.is_absolute)
-            assert_equal ("canonical path normalized", root.canonical_path.name, canonical.name)
+            normalized := ((root / "one") / "..").normalized_absolute_path
+            create normalized_base.make_from_string (normalized.name)
+            assert_true ("normalized path absolute", normalized_base.is_absolute)
+            assert_equal (
+                "absolute path normalized",
+                root.normalized_absolute_path.name,
+                normalized.name
+            )
         end
 
     test_string_conversion
@@ -103,7 +107,6 @@ feature -- Test
             unicode_file: OS_FILE_PATH
             unicode_name: STRING_32
             unicode_text: STRING_32
-            utf_8_text: STRING_8
         do
             root := current_test_root
             root.create_directory
@@ -126,17 +129,145 @@ feature -- Test
             assert_true ("written file exists", text_file.exists)
             assert_true ("written file is plain", text_file.is_plain_file)
             assert_false ("written file is not directory", text_file.is_directory)
-            assert_strings_equal ("read text", "first", text_file.read_text)
+            assert_text_equal ("read text", "first", text_file.text)
             text_file.write_text ("second")
-            assert_strings_equal ("overwrite text", "second", text_file.read_text)
+            assert_text_equal ("overwrite text", "second", text_file.text)
 
             unicode_name := {STRING_32} "данные.txt"
             unicode_text := {STRING_32} "Привет"
             unicode_file := root / unicode_name
             unicode_file.write_text (unicode_text)
-            utf_8_text := {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (unicode_text)
             assert_true ("unicode file name", unicode_file.exists)
-            assert_strings_equal ("utf-8 text", utf_8_text, unicode_file.read_text)
+            assert_text_equal ("unicode text", unicode_text, unicode_file.text)
+            assert_bytes_equal (
+                "utf-8 bytes",
+                {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (unicode_text),
+                unicode_file.bytes
+            )
+        end
+
+    test_binary_contents
+            -- Preserve raw bytes across multiple read blocks.
+        local
+            root: OS_FILE_PATH
+            binary_file: OS_FILE_PATH
+            raw_bytes: STRING_8
+        do
+            root := current_test_root
+            root.create_directory
+            binary_file := root / "binary.dat"
+            create raw_bytes.make_filled ('x', 4097)
+            raw_bytes.put ('%U', 1)
+            raw_bytes.put ('%/128/', 2049)
+            raw_bytes.put ('%/255/', 4097)
+            binary_file.write_bytes (raw_bytes)
+            assert_bytes_equal ("binary round-trip", raw_bytes, binary_file.bytes)
+
+            binary_file.write_bytes ("")
+            assert_true ("empty bytes", binary_file.bytes.is_empty)
+        end
+
+    test_text_encodings_and_failures
+            -- Decode explicit encodings and reject malformed or lossy text.
+        local
+            root: OS_FILE_PATH
+            latin_1_file: OS_FILE_PATH
+            invalid_utf_8_file: OS_FILE_PATH
+            bom_file: OS_FILE_PATH
+            latin_1: ENCODING
+            latin_1_text: STRING_32
+            unrepresentable_text: STRING_32
+            invalid_utf_8: STRING_8
+            bom_bytes: STRING_8
+            bom_text: IMMUTABLE_STRING_32
+        do
+            root := current_test_root
+            root.create_directory
+            latin_1_file := root / "latin-1.txt"
+            latin_1 := {SYSTEM_ENCODINGS}.iso_8859_1
+            assert_true (
+                "latin-1 encoding",
+                latin_1.code_page.is_case_insensitive_equal ("ISO-8859-1")
+            )
+            create latin_1_text.make_from_string_general ("caf")
+            latin_1_text.append_code (0xE9)
+            latin_1_file.write_text_with_encoding (latin_1_text, latin_1)
+            assert_text_equal (
+                "latin-1 text",
+                latin_1_text,
+                latin_1_file.text_with_encoding (latin_1)
+            )
+            assert_integers_equal (
+                "latin-1 byte count",
+                4,
+                latin_1_file.bytes.count
+            )
+            assert_integers_equal (
+                "latin-1 byte",
+                233,
+                latin_1_file.bytes.code (latin_1_file.bytes.count).to_integer_32
+            )
+
+            latin_1_file.write_bytes ("before")
+            create unrepresentable_text.make (1)
+            unrepresentable_text.append_code (0x20AC)
+            assert_exception (
+                "unrepresentable text rejected",
+                agent latin_1_file.write_text_with_encoding (unrepresentable_text, latin_1)
+            )
+            assert_bytes_equal ("failed encoding preserves file", "before", latin_1_file.bytes)
+
+            invalid_utf_8_file := root / "invalid-utf-8.txt"
+            create invalid_utf_8.make (2)
+            invalid_utf_8.extend ('%/195/')
+            invalid_utf_8.extend ('(')
+            invalid_utf_8_file.write_bytes (invalid_utf_8)
+            assert_exception ("invalid UTF-8 rejected", agent invalid_utf_8_file.text)
+
+            bom_file := root / "bom.txt"
+            create bom_bytes.make (6)
+            bom_bytes.extend ('%/239/')
+            bom_bytes.extend ('%/187/')
+            bom_bytes.extend ('%/191/')
+            bom_bytes.append ("bom")
+            bom_file.write_bytes (bom_bytes)
+            bom_text := bom_file.text
+            assert_integers_equal ("BOM text count", 4, bom_text.count)
+            assert_true ("BOM preserved", bom_text.code (1) = 0xFEFF)
+        end
+
+    test_parallel_text_conversion
+            -- Keep stateful encoding results isolated across threads.
+        local
+            root: OS_FILE_PATH
+            first_file: OS_FILE_PATH
+            second_file: OS_FILE_PATH
+            latin_1: ENCODING
+            first_text: STRING_32
+            second_text: STRING_32
+            first_reader: OS_FILE_PATH_ENCODING_READER
+            second_reader: OS_FILE_PATH_ENCODING_READER
+        do
+            root := current_test_root
+            root.create_directory
+            first_file := root / "first-latin-1.txt"
+            second_file := root / "second-latin-1.txt"
+            latin_1 := {SYSTEM_ENCODINGS}.iso_8859_1
+            create first_text.make_from_string_general ("first-")
+            first_text.append_code (0xE9)
+            create second_text.make_from_string_general ("second-")
+            second_text.append_code (0xF1)
+            first_file.write_text_with_encoding (first_text, latin_1)
+            second_file.write_text_with_encoding (second_text, latin_1)
+
+            create first_reader.make (first_file, latin_1, first_text)
+            create second_reader.make (second_file, latin_1, second_text)
+            first_reader.launch
+            second_reader.launch
+            first_reader.join
+            second_reader.join
+            assert_true ("first parallel reader", first_reader.successful)
+            assert_true ("second parallel reader", second_reader.successful)
         end
 
     test_symbolic_links
@@ -207,6 +338,24 @@ feature {NONE} -- Support
         do
             create a_path.make_from_string (a_name)
             Result := a_path.name
+        end
+
+    assert_bytes_equal (
+        a_tag: STRING_8;
+        a_expected, a_actual: READABLE_STRING_8
+    )
+            -- Assert that `a_actual` contains the expected bytes.
+        do
+            assert_true (a_tag, a_actual.same_string (a_expected))
+        end
+
+    assert_text_equal (
+        a_tag: STRING_8;
+        a_expected, a_actual: READABLE_STRING_GENERAL
+    )
+            -- Assert that `a_actual` contains the expected text.
+        do
+            assert_true (a_tag, a_actual.same_string (a_expected))
         end
 
     current_test_root: OS_FILE_PATH

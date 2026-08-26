@@ -110,14 +110,26 @@ do
 
     file := directory / "message.txt"
     file.write_text ("Hello from os%N")
-    io.put_string (file.read_text)
+    io.put_string (file.text)
 end
 ```
 
 `OS_FILE_PATH` also provides `exists`, `is_directory`, `is_plain_file`,
-`is_empty_directory`, `parent`, `canonical_path`, and `delete_recursively`.
-Recursive deletion removes a symbolic link itself rather than following its
-target.
+`is_empty_directory`, `parent`, `normalized_absolute_path`, `bytes`,
+`write_bytes`, and `delete_recursively`. Recursive deletion removes a symbolic
+link itself rather than following its target.
+
+`text` and `write_text` use strict UTF-8 without automatic byte-order-mark
+detection. Use an explicit `ENCODING` for another character set:
+
+```eiffel
+file.write_text_with_encoding ("Hello", {SYSTEM_ENCODINGS}.iso_8859_1)
+io.put_string (file.text_with_encoding ({SYSTEM_ENCODINGS}.iso_8859_1))
+```
+
+Invalid input and characters that cannot be represented in the selected
+encoding raise an exception. Use `bytes` and `write_bytes` when contents are
+not text.
 
 ## Important behavior
 

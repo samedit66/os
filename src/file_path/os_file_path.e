@@ -6,6 +6,9 @@ create
     make,
     make_from_path
 
+convert
+    make ({STRING_8, STRING_32, READABLE_STRING_GENERAL})
+
 feature -- Initialization
 
     make (a_name: READABLE_STRING_GENERAL)

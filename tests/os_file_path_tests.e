@@ -54,6 +54,31 @@ feature -- Test
             assert_equal ("canonical path normalized", root.canonical_path.name, canonical.name)
         end
 
+    test_string_conversion
+            -- Convert readable strings to paths.
+        local
+            converted: OS_FILE_PATH
+            string_8: STRING_8
+            string_32: STRING_32
+            general: READABLE_STRING_GENERAL
+        do
+            converted := "literal/path"
+            assert_true ("literal", converted.name.same_string_general ("literal/path"))
+
+            string_8 := "eight-bit/path"
+            converted := string_8
+            assert_true ("string 8", converted.name.same_string_general (string_8))
+
+            string_32 := {STRING_32} "каталог/файл"
+            converted := string_32
+            assert_true ("string 32", converted.name.same_string_general (string_32))
+
+            general := string_32
+            converted := general
+            assert_true ("readable string general", converted.name.same_string_general (general))
+            assert_true ("argument", path_name ("argument/path").same_string_general ("argument/path"))
+        end
+
     test_missing_entry
             -- Report stable negative states for an absent entry.
         local
@@ -168,6 +193,12 @@ feature -- Test
         end
 
 feature {NONE} -- Support
+
+    path_name (a_path: OS_FILE_PATH): IMMUTABLE_STRING_32
+            -- Name of `a_path`.
+        do
+            Result := a_path.name
+        end
 
     current_test_root: OS_FILE_PATH
             -- Root reserved for the current test.

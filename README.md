@@ -147,9 +147,8 @@ arguments do not require shell escaping.
 Set an optional working directory before starting the command:
 
 ```eiffel
-create repository.make ("/path/to/repository")
 create command.make ("git", << "status", "--short" >>)
-command.set_working_directory (repository)
+command.set_working_directory ("/path/to/repository")
 process_result := command.run
 ```
 

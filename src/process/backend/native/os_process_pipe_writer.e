@@ -27,7 +27,27 @@ feature {OS_PROCESS} -- Status report
     has_failed: BOOLEAN
             -- Did a native write or close fail?
         do
-            Result := write_failed
+            Result := write_failed or close_failed
+        end
+
+    failure_description: detachable STRING_8
+            -- Description of the first failure, if any.
+        local
+            description: STRING_8
+        do
+            if write_failed then
+                create description.make_from_string ("Cannot write standard input")
+                if write_error_code > 0 then
+                    append_native_error (description, write_error_code)
+                end
+                Result := description
+            elseif close_failed then
+                create description.make_from_string ("Cannot close standard input")
+                append_native_error (description, close_error_code)
+                Result := description
+            end
+        ensure
+            failure_reported: has_failed = attached Result
         end
 
 feature {OS_PROCESS} -- Basic operations
@@ -56,35 +76,41 @@ feature {NONE} -- Writing
             area_index: INTEGER
             count: INTEGER
             written: INTEGER
+            retried: BOOLEAN
         do
-            create area.make (buffer_capacity)
-            from
-                input_index := 1
-            until
-                input_index > input.count or write_failed
-            loop
-                count := buffer_capacity.min (input.count - input_index + 1)
+            if not retried then
+                create area.make (buffer_capacity)
                 from
-                    area_index := 0
+                    input_index := 1
                 until
-                    area_index = count
+                    input_index > input.count or write_failed
                 loop
-                    area.put_natural_8 (input.code (input_index + area_index).to_natural_8, area_index)
-                    area_index := area_index + 1
+                    count := buffer_capacity.min (input.count - input_index + 1)
+                    from
+                        area_index := 0
+                    until
+                        area_index = count
+                    loop
+                        area.put_natural_8 (input.code (input_index + area_index).to_natural_8, area_index)
+                        area_index := area_index + 1
+                    end
+                    written := c_write_stdin (process, area.item, count)
+                    if written > 0 then
+                        input_index := input_index + written
+                    elseif written = 0 then
+                        input_index := input.count + 1
+                    else
+                        write_failed := True
+                        write_error_code := -written
+                    end
                 end
-                written := c_write_stdin (process, area.item, count)
-                if written > 0 then
-                    input_index := input_index + written
-                elseif written = 0 then
-                    input_index := input.count + 1
-                else
-                    write_failed := True
-                end
+                close_pipe
             end
-            close_pipe
         rescue
             write_failed := True
             close_pipe
+            retried := True
+            retry
         end
 
     close_pipe
@@ -96,9 +122,20 @@ feature {NONE} -- Writing
                 status := c_close_stdin (process)
                 is_closed := True
                 if status /= 0 then
-                    write_failed := True
+                    close_failed := True
+                    close_error_code := status
                 end
             end
+        end
+
+    append_native_error (a_message: STRING_8; a_code: INTEGER)
+            -- Append native error `a_code` to `a_message`.
+        require
+            positive_code: a_code > 0
+        do
+            a_message.append (" (native error ")
+            a_message.append_integer (a_code)
+            a_message.append_character (')')
         end
 
 feature {NONE} -- Native bridge
@@ -118,6 +155,12 @@ feature {NONE} -- Implementation
     worker: WORKER_THREAD
 
     write_failed: BOOLEAN
+
+    close_failed: BOOLEAN
+
+    write_error_code: INTEGER
+
+    close_error_code: INTEGER
 
     is_closed: BOOLEAN
 

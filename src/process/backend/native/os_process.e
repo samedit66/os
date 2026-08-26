@@ -58,12 +58,12 @@ feature {NONE} -- Initialization
                 if c_is_command_error (error_area.read_integer_32 (0)) then
                     exit_status := command_launch_failure
                     process_exited := True
-                    create process_result.make_launch_failure
-                    finished := True
+                    complete
                 else
                     raise_native_failure ("Cannot start process", error_area.read_integer_32 (0))
                 end
             else
+                was_launched := True
                 create out_reader.make (native_handle, True, a_stdout)
                 create err_reader.make (native_handle, False, a_stderr)
                 create in_writer.make (native_handle, a_input)
@@ -71,11 +71,16 @@ feature {NONE} -- Initialization
                 stderr_reader := err_reader
                 stdin_writer := in_writer
                 out_reader.launch
+                stdout_reader_launched := True
                 err_reader.launch
+                stderr_reader_launched := True
                 in_writer.launch
+                stdin_writer_launched := True
             end
         ensure
             missing_process_has_result: native_handle = default_pointer implies is_finished
+        rescue
+            rollback_initialization
         end
 
 feature -- Access
@@ -85,6 +90,7 @@ feature -- Access
         require
             finished: is_finished
         do
+            report_failure
             check attached process_result as completed_outcome then
                 Result := completed_outcome
             end
@@ -95,18 +101,27 @@ feature -- Status report
     is_finished: BOOLEAN
             -- Is execution complete and its result available?
         do
+            Result := finished
+        ensure
+            terminal_state_available: Result implies
+                (attached process_result or attached failure_message)
+        end
+
+feature -- Basic operations
+
+    poll
+            -- Check for completion without waiting.
+        do
             if not finished then
                 poll_process
                 if process_exited and then io_finished then
                     complete
                 end
             end
-            Result := finished
+            report_failure
         ensure
-            result_available: Result implies attached process_result
+            finished_is_stable: old is_finished implies is_finished
         end
-
-feature -- Basic operations
 
     wait
             -- Wait for execution and output collection to complete.
@@ -127,7 +142,7 @@ feature -- Basic operations
                 join_workers
                 complete
             end
-            report_io_failure
+            report_failure
         ensure
             finished: is_finished
         end
@@ -137,15 +152,51 @@ feature -- Basic operations
         local
             status: INTEGER
         do
-            if not is_finished and then native_handle /= default_pointer then
-                status := c_terminate (native_handle)
-                if status /= 0 then
-                    raise_native_failure ("Cannot terminate process", status)
+            if not finished then
+                poll_process
+                if process_exited then
+                    if io_finished then
+                        complete
+                    end
+                elseif native_handle /= default_pointer then
+                    status := c_terminate (native_handle)
+                    if status /= 0 then
+                        raise_native_failure ("Cannot terminate process", status)
+                    end
                 end
             end
         end
 
 feature {NONE} -- Completion
+
+    rollback_initialization
+            -- Release a child whose Eiffel workers could not be initialized.
+        local
+            exit_area: MANAGED_POINTER
+            status: INTEGER
+        do
+            if was_launched and then native_handle /= default_pointer then
+                status := c_close_stdin (native_handle)
+                status := c_terminate (native_handle)
+                create exit_area.make ({PLATFORM}.integer_32_bytes)
+                status := c_wait (native_handle, exit_area.item)
+                if status = 0 then
+                    exit_status := exit_area.read_integer_32 (0)
+                    process_exited := True
+                    if stdout_reader_launched and then attached stdout_reader as out_reader then
+                        out_reader.join
+                    end
+                    if stderr_reader_launched and then attached stderr_reader as err_reader then
+                        err_reader.join
+                    end
+                    if stdin_writer_launched and then attached stdin_writer as in_writer then
+                        in_writer.join
+                    end
+                    c_free (native_handle)
+                    native_handle := default_pointer
+                end
+            end
+        end
 
     poll_process
             -- Poll the child and retain its status when it has exited.
@@ -193,7 +244,7 @@ feature {NONE} -- Completion
         end
 
     complete
-            -- Capture the completed outcome and release the native process.
+            -- Publish terminal state and release the native process.
         require
             process_exited: process_exited
             io_finished: io_finished
@@ -201,20 +252,31 @@ feature {NONE} -- Completion
             if not finished then
                 if attached stdout_reader as out_reader then
                     stdout_snapshot := out_reader.output.to_string_8
+                    record_failure (out_reader.failure_description)
                 end
                 if attached stderr_reader as err_reader then
                     stderr_snapshot := err_reader.output.to_string_8
+                    record_failure (err_reader.failure_description)
+                end
+                if attached stdin_writer as in_writer then
+                    record_failure (in_writer.failure_description)
                 end
                 if native_handle /= default_pointer then
                     c_free (native_handle)
                     native_handle := default_pointer
                 end
-                create process_result.make_launched (exit_status, stdout_snapshot, stderr_snapshot)
+                if not attached failure_message then
+                    if was_launched then
+                        create process_result.make_launched (exit_status, stdout_snapshot, stderr_snapshot)
+                    else
+                        create process_result.make_launch_failure
+                    end
+                end
                 finished := True
             end
         ensure
             finished: finished
-            result_available: attached process_result
+            terminal_state_available: attached process_result or attached failure_message
             handle_released: native_handle = default_pointer
         end
 
@@ -228,22 +290,20 @@ feature {NONE} -- Conversion
 
 feature {NONE} -- Error handling
 
-    report_io_failure
-            -- Report an I/O or callback failure after joining all workers.
+    record_failure (a_description: detachable READABLE_STRING_8)
+            -- Retain `a_description` if no earlier failure was recorded.
         do
-            if attached stdout_reader as out_reader and then out_reader.has_failed then
-                raise_pipe_failure
-            elseif attached stderr_reader as err_reader and then err_reader.has_failed then
-                raise_pipe_failure
-            elseif attached stdin_writer as in_writer and then in_writer.has_failed then
-                raise_pipe_failure
+            if not attached failure_message and then attached a_description as description then
+                failure_message := description.to_string_8
             end
         end
 
-    raise_pipe_failure
-            -- Report a process pipe worker failure.
+    report_failure
+            -- Report the retained terminal failure, if any.
         do
-            (create {EXCEPTIONS}).raise ("A process pipe worker failed")
+            if attached failure_message as message then
+                (create {EXCEPTIONS}).raise (message)
+            end
         end
 
     raise_native_failure (a_operation: READABLE_STRING_8; a_code: INTEGER)
@@ -272,6 +332,9 @@ feature {NONE} -- Native bridge
     c_terminate (a_process: POINTER): INTEGER
         external "C use <subprocess.h>" alias "os_process_terminate" end
 
+    c_close_stdin (a_process: POINTER): INTEGER
+        external "C use <subprocess.h>" alias "os_process_close_stdin" end
+
     c_free (a_process: POINTER)
         external "C use <subprocess.h>" alias "os_process_free" end
 
@@ -288,11 +351,21 @@ feature {NONE} -- Implementation
 
     stdin_writer: detachable OS_PROCESS_PIPE_WRITER
 
+    stdout_reader_launched: BOOLEAN
+
+    stderr_reader_launched: BOOLEAN
+
+    stdin_writer_launched: BOOLEAN
+
     stdout_snapshot: STRING_8
 
     stderr_snapshot: STRING_8
 
     process_result: detachable OS_PROCESS_RESULT
+
+    failure_message: detachable STRING_8
+
+    was_launched: BOOLEAN
 
     exit_status: INTEGER
 
@@ -301,5 +374,18 @@ feature {NONE} -- Implementation
     finished: BOOLEAN
 
     command_launch_failure: INTEGER = 127
+
+invariant
+    finished_process_exited: finished implies process_exited
+    finished_io_finished: finished implies io_finished
+    finished_handle_released: finished implies native_handle = default_pointer
+    finished_has_terminal_state: finished implies
+        ((attached process_result) xor (attached failure_message))
+    unfinished_has_no_terminal_state: not finished implies
+        (process_result = Void and failure_message = Void)
+    live_process_has_handle: not finished implies native_handle /= default_pointer
+    handle_belongs_to_launched_process: native_handle /= default_pointer implies was_launched
+    result_is_terminal: attached process_result implies finished
+    failure_is_terminal: attached failure_message implies finished
 
 end

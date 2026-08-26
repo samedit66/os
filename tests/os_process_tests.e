@@ -19,6 +19,7 @@ feature {NONE} -- Initialization
         do
             create callback_stdout.make_empty
             create callback_stderr.make_empty
+            callback_call_count := 0
         end
 
 feature -- Execution
@@ -55,7 +56,7 @@ feature -- Test
             create command.make (process_child_executable, arguments)
             process_result := command.run
             assert_integers_equal ("arguments exit", 0, process_result.exit_code)
-            assert_strings_equal (
+            assert_readable_strings_equal (
                 "arguments stdout",
                 "[11]hello world[3]a%"b[3]c\d[16]ends with slash\[0]",
                 process_result.stdout
@@ -106,11 +107,43 @@ feature -- Test
             process.wait
             process_result := process.outcome
             assert_integers_equal ("stream exit", 0, process_result.exit_code)
-            assert_strings_equal ("stream stdout", "stdout-data", process_result.stdout)
-            assert_strings_equal ("stream stderr", "stderr-data", process_result.stderr)
-            assert_strings_equal ("stdout callback", process_result.stdout, callback_stdout)
-            assert_strings_equal ("stderr callback", process_result.stderr, callback_stderr)
+            assert_readable_strings_equal ("stream stdout", "stdout-data", process_result.stdout)
+            assert_readable_strings_equal ("stream stderr", "stderr-data", process_result.stderr)
+            assert_readable_strings_equal ("stdout callback", process_result.stdout, callback_stdout)
+            assert_readable_strings_equal ("stderr callback", process_result.stderr, callback_stderr)
             assert_true ("stream finished", process.is_finished)
+        end
+
+    test_callback_failure
+            -- Contain one callback exception and report it after cleanup.
+        local
+            command: OS_COMMAND
+            process: OS_PROCESS
+        do
+            callback_call_count := 0
+            create command.make (process_child_executable, child_arguments ("large"))
+            process := command.start_with_handlers (agent fail_stdout, Void)
+
+            assert_true ("callback wait failed", wait_failed (process))
+            assert_true ("callback process finished", process.is_finished)
+            assert_integers_equal ("callback disabled after failure", 1, callback_call_count)
+            assert_true ("callback outcome failed", outcome_failed (process))
+        end
+
+    test_polled_callback_failure
+            -- Report the same callback failure through nonblocking polling.
+        local
+            command: OS_COMMAND
+            process: OS_PROCESS
+        do
+            callback_call_count := 0
+            create command.make (process_child_executable, child_arguments ("large"))
+            process := command.start_with_handlers (agent fail_stdout, Void)
+
+            assert_true ("callback poll failed", polling_failed (process))
+            assert_true ("polled callback process finished", process.is_finished)
+            assert_integers_equal ("polled callback disabled", 1, callback_call_count)
+            assert_true ("polled callback outcome failed", outcome_failed (process))
         end
 
     test_large_output
@@ -135,7 +168,7 @@ feature -- Test
             create command.make (process_child_executable, child_arguments ("count-input"))
             process_result := command.run
             assert_integers_equal ("default input exit", 0, process_result.exit_code)
-            assert_strings_equal ("default input count", "0", process_result.stdout)
+            assert_readable_strings_equal ("default input count", "0", process_result.stdout)
         end
 
     test_input_bytes_and_caller_snapshot
@@ -154,7 +187,7 @@ feature -- Test
 
             process_result := command.run
             assert_integers_equal ("byte input exit", 0, process_result.exit_code)
-            assert_strings_equal (
+            assert_readable_strings_equal (
                 "byte input",
                 "8:98,101,102,111,114,101,0,255",
                 process_result.stdout
@@ -176,8 +209,8 @@ feature -- Test
             first_process.wait
             second_process.wait
 
-            assert_strings_equal ("first input snapshot", "first input", first_process.outcome.stdout)
-            assert_strings_equal ("second input snapshot", "second input", second_process.outcome.stdout)
+            assert_readable_strings_equal ("first input snapshot", "first input", first_process.outcome.stdout)
+            assert_readable_strings_equal ("second input snapshot", "second input", second_process.outcome.stdout)
         end
 
     test_large_duplex_input_and_output
@@ -200,7 +233,7 @@ feature -- Test
                 output_byte_count + bytes.count.out.count,
                 process_result.stdout.count
             )
-            assert_strings_equal (
+            assert_readable_strings_equal (
                 "duplex input count",
                 bytes.count.out,
                 process_result.stdout.substring (output_byte_count + 1, process_result.stdout.count)
@@ -245,7 +278,7 @@ feature -- Test
         local
             command: OS_COMMAND
             process: OS_PROCESS
-            first_output: STRING_8
+            first_output: READABLE_STRING_8
         do
             create command.make (process_child_executable, child_arguments ("emit"))
             process := command.start
@@ -253,7 +286,7 @@ feature -- Test
             first_output := process.outcome.stdout
             process.wait
             assert_integers_equal ("second wait exit", 0, process.outcome.exit_code)
-            assert_strings_equal ("second wait output", first_output, process.outcome.stdout)
+            assert_readable_strings_equal ("second wait output", first_output, process.outcome.stdout)
         end
 
     test_missing_command
@@ -365,7 +398,7 @@ feature -- Test
 
             process_result := command.run
             assert_integers_equal ("copied arguments exit", 0, process_result.exit_code)
-            assert_strings_equal ("copied arguments stdout", "[6]before", process_result.stdout)
+            assert_readable_strings_equal ("copied arguments stdout", "[6]before", process_result.stdout)
         end
 
     test_repeated_command
@@ -378,8 +411,8 @@ feature -- Test
             create command.make (process_child_executable, child_arguments ("emit"))
             first_result := command.run
             second_result := command.run
-            assert_strings_equal ("first repeated output", "stdout-data", first_result.stdout)
-            assert_strings_equal ("second repeated output", first_result.stdout, second_result.stdout)
+            assert_readable_strings_equal ("first repeated output", "stdout-data", first_result.stdout)
+            assert_readable_strings_equal ("second repeated output", first_result.stdout, second_result.stdout)
         end
 
     test_run_matches_started_outcome
@@ -396,8 +429,8 @@ feature -- Test
             process.wait
             started_result := process.outcome
             assert_integers_equal ("matching exit", run_result.exit_code, started_result.exit_code)
-            assert_strings_equal ("matching stdout", run_result.stdout, started_result.stdout)
-            assert_strings_equal ("matching stderr", run_result.stderr, started_result.stderr)
+            assert_readable_strings_equal ("matching stdout", run_result.stdout, started_result.stdout)
+            assert_readable_strings_equal ("matching stderr", run_result.stderr, started_result.stderr)
         end
 
     test_overlapping_command_starts
@@ -412,8 +445,8 @@ feature -- Test
             second_process := command.start
             first_process.wait
             second_process.wait
-            assert_strings_equal ("first overlapping output", "stdout-data", first_process.outcome.stdout)
-            assert_strings_equal ("second overlapping output", "stdout-data", second_process.outcome.stdout)
+            assert_readable_strings_equal ("first overlapping output", "stdout-data", first_process.outcome.stdout)
+            assert_readable_strings_equal ("second overlapping output", "stdout-data", second_process.outcome.stdout)
         end
 
     test_inherited_working_directory
@@ -429,7 +462,7 @@ feature -- Test
                 child_arguments ("working-directory")
             )
             process_result := command.run
-            assert_strings_equal (
+            assert_readable_strings_equal (
                 "inherited working directory",
                 utf_8 (environment.current_working_path.name),
                 process_result.stdout
@@ -462,12 +495,12 @@ feature -- Test
             first_result := process.outcome
             second_result := command.run
 
-            assert_strings_equal (
+            assert_readable_strings_equal (
                 "started working directory",
                 utf_8 (first_directory.canonical_path.name),
                 first_result.stdout
             )
-            assert_strings_equal (
+            assert_readable_strings_equal (
                 "updated working directory",
                 utf_8 (second_directory.canonical_path.name),
                 second_result.stdout
@@ -505,7 +538,7 @@ feature -- Test
                 parent_changed := environment.return_code /= 0
                 assert_false ("parent directory restored", parent_changed)
                 process.wait
-                assert_strings_equal (
+                assert_readable_strings_equal (
                     "relative directory snapshot",
                     utf_8 (original.canonical_path.name),
                     process.outcome.stdout
@@ -535,16 +568,18 @@ feature -- Test
             process := command.start
             create environment
             from
+                process.poll
             until
                 process.is_finished or attempts = polling_attempt_limit
             loop
                 environment.sleep (polling_interval)
                 attempts := attempts + 1
+                process.poll
             end
             if process.is_finished then
                 assert_integers_equal ("polled exit", 0, process.outcome.exit_code)
-                assert_strings_equal ("polled stdout", "stdout-data", process.outcome.stdout)
-                assert_strings_equal ("polled stderr", "stderr-data", process.outcome.stderr)
+                assert_readable_strings_equal ("polled stdout", "stdout-data", process.outcome.stdout)
+                assert_readable_strings_equal ("polled stderr", "stderr-data", process.outcome.stderr)
             else
                 process.terminate
                 process.wait
@@ -566,6 +601,13 @@ feature {NONE} -- Callback collection
             callback_stderr.append (a_chunk)
         end
 
+    fail_stdout (a_chunk: READABLE_STRING_8)
+            -- Fail the first attempted stdout callback.
+        do
+            callback_call_count := callback_call_count + 1
+            (create {EXCEPTIONS}).raise ("Expected callback failure")
+        end
+
 feature {NONE} -- Support
 
     process_child_executable: STRING
@@ -585,6 +627,67 @@ feature {NONE} -- Support
             create Result.make (2)
             Result.extend ("--child")
             Result.extend (a_mode)
+        end
+
+    wait_failed (a_process: OS_PROCESS): BOOLEAN
+            -- Did waiting for `a_process` report a failure?
+        local
+            retried: BOOLEAN
+        do
+            if retried then
+                Result := True
+            else
+                a_process.wait
+            end
+        rescue
+            retried := True
+            retry
+        end
+
+    outcome_failed (a_process: OS_PROCESS): BOOLEAN
+            -- Did obtaining `a_process.outcome` report a failure?
+        local
+            retried: BOOLEAN
+            ignored: detachable OS_PROCESS_RESULT
+        do
+            if retried then
+                Result := True
+            else
+                ignored := a_process.outcome
+            end
+        rescue
+            retried := True
+            retry
+        end
+
+    polling_failed (a_process: OS_PROCESS): BOOLEAN
+            -- Did polling `a_process` to completion report a failure?
+        local
+            environment: EXECUTION_ENVIRONMENT
+            attempts: INTEGER
+            retried: BOOLEAN
+        do
+            if retried then
+                Result := True
+            else
+                create environment
+                from
+                    a_process.poll
+                until
+                    a_process.is_finished or attempts = polling_attempt_limit
+                loop
+                    environment.sleep (polling_interval)
+                    attempts := attempts + 1
+                    a_process.poll
+                end
+                if not a_process.is_finished then
+                    a_process.terminate
+                    a_process.wait
+                end
+            end
+        rescue
+            retried := True
+            retry
         end
 
     current_test_root: OS_FILE_PATH
@@ -633,11 +736,22 @@ feature {NONE} -- Support
             Result := {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (a_text)
         end
 
+    assert_readable_strings_equal (
+        a_tag: STRING_8;
+        a_expected, a_actual: READABLE_STRING_8
+    )
+            -- Assert that `a_actual` has the same bytes as `a_expected`.
+        do
+            assert_true (a_tag, a_actual.same_string (a_expected))
+        end
+
 feature {NONE} -- State
 
     callback_stdout: STRING_8
 
     callback_stderr: STRING_8
+
+    callback_call_count: INTEGER
 
     test_root: detachable OS_FILE_PATH
 

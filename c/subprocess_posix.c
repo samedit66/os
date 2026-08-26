@@ -16,6 +16,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdlib.h>
@@ -27,6 +28,7 @@ extern char **environ;
 
 struct os_process {
     pid_t pid;
+    int stdin_fd;
     int stdout_fd;
     int stderr_fd;
     int exit_code;
@@ -83,6 +85,7 @@ os_process *os_process_start(
     int *error_code
 )
 {
+    int stdin_pipe[2] = {-1, -1};
     int stdout_pipe[2] = {-1, -1};
     int stderr_pipe[2] = {-1, -1};
     posix_spawn_file_actions_t actions;
@@ -97,6 +100,10 @@ os_process *os_process_start(
     if (executable == NULL || arguments == NULL || error_code == NULL) {
         return NULL;
     }
+    if (pipe(stdin_pipe) != 0) {
+        result = errno;
+        goto fail;
+    }
     if (pipe(stdout_pipe) != 0) {
         result = errno;
         goto fail;
@@ -105,6 +112,10 @@ os_process *os_process_start(
         result = errno;
         goto fail;
     }
+    result = set_close_on_exec(stdin_pipe[0]);
+    if (result != 0) goto fail;
+    result = set_close_on_exec(stdin_pipe[1]);
+    if (result != 0) goto fail;
     result = set_close_on_exec(stdout_pipe[0]);
     if (result != 0) goto fail;
     result = set_close_on_exec(stdout_pipe[1]);
@@ -118,10 +129,13 @@ os_process *os_process_start(
     if (result != 0) goto fail;
     actions_initialized = 1;
 #define ADD_ACTION(call) do { result = (call); if (result != 0) goto fail; } while (0)
+    ADD_ACTION(posix_spawn_file_actions_adddup2(&actions, stdin_pipe[0], STDIN_FILENO));
     ADD_ACTION(posix_spawn_file_actions_adddup2(&actions, stdout_pipe[1], STDOUT_FILENO));
     ADD_ACTION(posix_spawn_file_actions_adddup2(&actions, stderr_pipe[1], STDERR_FILENO));
+    ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdin_pipe[1]));
     ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdout_pipe[0]));
     ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stderr_pipe[0]));
+    ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdin_pipe[0]));
     ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdout_pipe[1]));
     ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stderr_pipe[1]));
     if (working_directory != NULL) {
@@ -133,6 +147,7 @@ os_process *os_process_start(
     if (result != 0) goto fail;
     (void)posix_spawn_file_actions_destroy(&actions);
     actions_initialized = 0;
+    close_fd(&stdin_pipe[0]);
     close_fd(&stdout_pipe[1]);
     close_fd(&stderr_pipe[1]);
 
@@ -145,9 +160,11 @@ os_process *os_process_start(
         goto fail;
     }
     process->pid = pid;
+    process->stdin_fd = stdin_pipe[1];
     process->stdout_fd = stdout_pipe[0];
     process->stderr_fd = stderr_pipe[0];
     process->exit_code = -1;
+    stdin_pipe[1] = -1;
     stdout_pipe[0] = -1;
     stderr_pipe[0] = -1;
     return process;
@@ -156,6 +173,8 @@ fail:
     if (actions_initialized) {
         (void)posix_spawn_file_actions_destroy(&actions);
     }
+    close_fd(&stdin_pipe[0]);
+    close_fd(&stdin_pipe[1]);
     close_fd(&stdout_pipe[0]);
     close_fd(&stdout_pipe[1]);
     close_fd(&stderr_pipe[0]);
@@ -182,6 +201,58 @@ int os_process_read_stdout(os_process *process, void *buffer, int capacity)
 int os_process_read_stderr(os_process *process, void *buffer, int capacity)
 {
     return process == NULL ? -EINVAL : read_fd(process->stderr_fd, buffer, capacity);
+}
+
+static int write_fd_without_sigpipe(int fd, const void *buffer, int capacity)
+{
+    sigset_t blocked;
+    sigset_t old_mask;
+    sigset_t pending;
+    struct sigaction pipe_action;
+    ssize_t count;
+    int mask_error;
+    int pipe_was_pending;
+    int pipe_is_ignored;
+    int saved_error;
+    int ignored_signal;
+
+    if (buffer == NULL || capacity <= 0) return -EINVAL;
+    if (sigemptyset(&blocked) != 0 || sigaddset(&blocked, SIGPIPE) != 0) {
+        return -errno;
+    }
+    if (sigaction(SIGPIPE, NULL, &pipe_action) != 0) return -errno;
+    pipe_is_ignored = pipe_action.sa_handler == SIG_IGN;
+    mask_error = pthread_sigmask(SIG_BLOCK, &blocked, &old_mask);
+    if (mask_error != 0) return -mask_error;
+    pipe_was_pending = sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE) == 1;
+    do {
+        count = write(fd, buffer, (size_t)capacity);
+    } while (count < 0 && errno == EINTR);
+    saved_error = count < 0 ? errno : 0;
+    if (saved_error == EPIPE && !pipe_was_pending && !pipe_is_ignored) {
+        (void)sigwait(&blocked, &ignored_signal);
+    }
+    mask_error = pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
+    if (mask_error != 0) return -mask_error;
+    if (saved_error == EPIPE) return 0;
+    return count < 0 ? -saved_error : (int)count;
+}
+
+int os_process_write_stdin(os_process *process, const void *buffer, int capacity)
+{
+    if (process == NULL) return -EINVAL;
+    if (process->stdin_fd < 0) return 0;
+    return write_fd_without_sigpipe(process->stdin_fd, buffer, capacity);
+}
+
+int os_process_close_stdin(os_process *process)
+{
+    int fd;
+    if (process == NULL) return EINVAL;
+    if (process->stdin_fd < 0) return 0;
+    fd = process->stdin_fd;
+    process->stdin_fd = -1;
+    return close(fd) == 0 ? 0 : errno;
 }
 
 int os_process_poll(os_process *process, int *finished, int *exit_code)
@@ -239,6 +310,7 @@ int os_process_terminate(os_process *process)
 void os_process_free(os_process *process)
 {
     if (process != NULL) {
+        close_fd(&process->stdin_fd);
         close_fd(&process->stdout_fd);
         close_fd(&process->stderr_fd);
         free(process);

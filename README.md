@@ -31,6 +31,7 @@ without hiding the places where operating systems genuinely behave differently.
 - One API for EiffelStudio and Gobo Eiffel.
 - Linux, macOS, and Windows support, continuously tested with both compilers.
 - Synchronous process execution with captured standard output and error.
+- Copied raw-byte standard input with EOF after the configured bytes.
 - Asynchronous processes with streaming callbacks, status polling, waiting,
   and termination.
 - Safe argument-vector execution that does not construct a shell command.
@@ -57,24 +58,15 @@ matrix:
 
 | Toolchain | Linux | macOS | Windows | Process backend |
 | --- | :---: | :---: | :---: | --- |
-| EiffelStudio | ✓ | ✓ | ✓ | EiffelStudio `PROCESS` library |
-| Gobo Eiffel | ✓ | ✓ | ✓ | Eiffel threads over a small native C11 bridge |
+| EiffelStudio | ✓ | ✓ | ✓ | Eiffel threads over the native C11 bridge |
+| Gobo Eiffel | ✓ | ✓ | ✓ | Eiffel threads over the native C11 bridge |
 
-> [!IMPORTANT]
-> The EiffelStudio 25.12 `process` library
-> (`$ISE_LIBRARY/library/process/process.ecf`) has a Windows argument-quoting
-> bug in `PROCESS_FACTORY.process_launcher`: embedded double quotes and
-> backslashes preceding quotes may be passed to the child process incorrectly.
-> The `os` EiffelStudio backend works around this limitation using the Microsoft
-> C runtime argument-parsing rules. Callers should pass unescaped arguments to
-> `OS_COMMAND.make`; no application-level workaround is needed.
-
-> [!CAUTION]
-> On Unix, the EiffelStudio `PROCESS` backend implements a child working
-> directory by temporarily changing the parent process directory around
-> `fork`. Concurrent EiffelStudio starts with different working directories
-> can therefore race. The Gobo native backend applies the directory only in
-> the child process and does not have this limitation.
+Both compilers deliberately use the same process backend. This removes
+compiler-specific lifecycle and quoting behavior, and keeps process fixes and
+tests on one implementation. It also makes the native library mandatory: every
+consumer must build and distribute the platform-specific C archive, and new
+platform support requires native implementation and CI coverage rather than an
+Eiffel-only integration.
 
 File-path operations use the common EiffelBase/FreeELKS `PATH`, `FILE_INFO`,
 `DIRECTORY`, and file classes. They do not need a compiler-specific backend.
@@ -99,10 +91,8 @@ Reference the library from the consuming project's ECF file:
 <library name="os" location="./vendor/os/os.ecf" readonly="true"/>
 ```
 
-The same ECF reference is used by both compilers. EiffelStudio selects its
-`PROCESS` backend and needs no native library from this repository. Gobo selects
-the native backend when `GOBO_EIFFEL=ge`; build its C bridge before compiling.
-On Linux and macOS:
+The same ECF reference and native backend are used by both compilers. Build the
+C bridge before compiling a client. On Linux and macOS:
 
 ```console
 make -C vendor/os native
@@ -157,6 +147,21 @@ The command stores an absolute canonical snapshot of the directory when
 subsequent executions; an already created `OS_PROCESS` retains its original
 directory.
 
+Set standard input before starting the command:
+
+```eiffel
+create command.make ("tool", << "--read-stdin" >>)
+command.set_input ("first line%Nsecond line%N")
+process_result := command.run
+```
+
+`set_input` copies a `READABLE_STRING_8` as raw bytes. The child receives those
+bytes followed by EOF; an unset or empty input produces immediate EOF. No text
+encoding or newline conversion is applied by the library. As with the working
+directory, changing the input affects only subsequent starts. Already started
+processes retain their own snapshots, including when one command is started
+more than once concurrently.
+
 ### Stream process output
 
 Use `start` when output should be handled as it arrives or when the caller needs
@@ -179,12 +184,12 @@ end
 ```
 
 The process provides `is_finished`, `wait`, `terminate`, and `outcome`.
-`is_finished` becomes true only after the child and both output readers have
-finished, so `outcome` is then available without a separate `wait`. Output
-callbacks may run concurrently and should return quickly; ordering is preserved
-within each stream, not between standard output and standard error. Both streams
-are exposed as raw `STRING_8` byte sequences; the library does not impose an
-output encoding.
+`is_finished` becomes true only after the child, both output readers, and the
+input writer have finished, so `outcome` is then available without a separate
+`wait`. Output callbacks may run concurrently and should return quickly;
+ordering is preserved within each stream, not between standard output and
+standard error. Both streams are exposed as raw `STRING_8` byte sequences; the
+library does not impose an output encoding.
 
 For commands that intentionally require a shell, use the separate helper:
 
@@ -222,7 +227,7 @@ target.
 ## Building
 
 Required tools are Gobo Eiffel 26.06, EiffelStudio 25.12 or later, and a C11
-compiler plus an archiver for the Gobo process backend.
+compiler plus an archiver for the shared process backend.
 
 On Linux and macOS, build and run the example with Gobo Eiffel:
 
@@ -265,6 +270,6 @@ clang-cl.
 ## Scope
 
 The process API deliberately focuses on the common portable workflow. For
-advanced EiffelStudio-only features such as custom standard input, environment
-replacement, timeouts, process trees, or detailed
-redirection control, use the EiffelStudio `PROCESS` library directly.
+advanced EiffelStudio-only features such as environment replacement, timeouts,
+process trees, interactive incremental input, or detailed redirection control,
+use the EiffelStudio `PROCESS` library directly.

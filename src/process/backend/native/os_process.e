@@ -11,9 +11,10 @@ feature {NONE} -- Initialization
         a_arguments: ITERABLE [READABLE_STRING_GENERAL];
         a_stdout: detachable PROCEDURE [READABLE_STRING_8];
         a_stderr: detachable PROCEDURE [READABLE_STRING_8];
-        a_working_directory: detachable READABLE_STRING_GENERAL
+        a_working_directory: detachable READABLE_STRING_GENERAL;
+        a_input: READABLE_STRING_8
     )
-            -- Launch the native process and its two Eiffel readers.
+            -- Launch the native process and its Eiffel pipe workers.
         local
             executable_c: C_STRING
             argument_strings: ARRAYED_LIST [C_STRING]
@@ -22,6 +23,7 @@ feature {NONE} -- Initialization
             working_directory_c: detachable C_STRING
             out_reader: OS_PROCESS_PIPE_READER
             err_reader: OS_PROCESS_PIPE_READER
+            in_writer: OS_PROCESS_PIPE_WRITER
             working_directory_pointer: POINTER
             offset: INTEGER
         do
@@ -63,10 +65,13 @@ feature {NONE} -- Initialization
             else
                 create out_reader.make (native_handle, True, a_stdout)
                 create err_reader.make (native_handle, False, a_stderr)
+                create in_writer.make (native_handle, a_input)
                 stdout_reader := out_reader
                 stderr_reader := err_reader
+                stdin_writer := in_writer
                 out_reader.launch
                 err_reader.launch
+                in_writer.launch
             end
         ensure
             missing_process_has_result: native_handle = default_pointer implies is_finished
@@ -91,7 +96,7 @@ feature -- Status report
         do
             if not finished then
                 poll_process
-                if process_exited and then readers_finished then
+                if process_exited and then io_finished then
                     complete
                 end
             end
@@ -118,10 +123,10 @@ feature -- Basic operations
                     exit_status := exit_area.read_integer_32 (0)
                     process_exited := True
                 end
-                join_readers
+                join_workers
                 complete
             end
-            report_reader_failure
+            report_io_failure
         ensure
             finished: is_finished
         end
@@ -161,16 +166,17 @@ feature {NONE} -- Completion
             end
         end
 
-    readers_finished: BOOLEAN
-            -- Have both output readers finished?
+    io_finished: BOOLEAN
+            -- Have all standard-I/O workers finished?
         do
             Result :=
                 (not attached stdout_reader as out_reader or else out_reader.is_finished) and then
-                (not attached stderr_reader as err_reader or else err_reader.is_finished)
+                (not attached stderr_reader as err_reader or else err_reader.is_finished) and then
+                (not attached stdin_writer as in_writer or else in_writer.is_finished)
         end
 
-    join_readers
-            -- Wait for both output readers.
+    join_workers
+            -- Wait for both output readers and the input writer.
         do
             if attached stdout_reader as out_reader then
                 out_reader.join
@@ -178,15 +184,18 @@ feature {NONE} -- Completion
             if attached stderr_reader as err_reader then
                 err_reader.join
             end
+            if attached stdin_writer as in_writer then
+                in_writer.join
+            end
         ensure
-            finished: readers_finished
+            finished: io_finished
         end
 
     complete
             -- Capture the completed outcome and release the native process.
         require
             process_exited: process_exited
-            readers_finished: readers_finished
+            io_finished: io_finished
         do
             if not finished then
                 if attached stdout_reader as out_reader then
@@ -218,20 +227,22 @@ feature {NONE} -- Conversion
 
 feature {NONE} -- Error handling
 
-    report_reader_failure
-            -- Report a read or callback failure after draining both streams.
+    report_io_failure
+            -- Report an I/O or callback failure after joining all workers.
         do
             if attached stdout_reader as out_reader and then out_reader.has_failed then
-                raise_reader_failure
+                raise_pipe_failure
             elseif attached stderr_reader as err_reader and then err_reader.has_failed then
-                raise_reader_failure
+                raise_pipe_failure
+            elseif attached stdin_writer as in_writer and then in_writer.has_failed then
+                raise_pipe_failure
             end
         end
 
-    raise_reader_failure
-            -- Report a process pipe reader failure.
+    raise_pipe_failure
+            -- Report a process pipe worker failure.
         do
-            (create {EXCEPTIONS}).raise ("A process pipe reader failed")
+            (create {EXCEPTIONS}).raise ("A process pipe worker failed")
         end
 
     raise_native_failure (a_operation: READABLE_STRING_8; a_code: INTEGER)
@@ -255,7 +266,7 @@ feature {NONE} -- Native bridge
         external "C use <subprocess.h>" alias "os_process_poll" end
 
     c_wait (a_process, a_exit_code: POINTER): INTEGER
-        external "C use <subprocess.h>" alias "os_process_wait" end
+        external "C blocking use <subprocess.h>" alias "os_process_wait" end
 
     c_terminate (a_process: POINTER): INTEGER
         external "C use <subprocess.h>" alias "os_process_terminate" end
@@ -273,6 +284,8 @@ feature {NONE} -- Implementation
     stdout_reader: detachable OS_PROCESS_PIPE_READER
 
     stderr_reader: detachable OS_PROCESS_PIPE_READER
+
+    stdin_writer: detachable OS_PROCESS_PIPE_WRITER
 
     stdout_snapshot: STRING_8
 

@@ -112,6 +112,120 @@ feature -- Test
             assert_integers_equal ("large stderr", large_block_size * large_block_count, process_result.stderr.count)
         end
 
+    test_default_input_is_eof
+            -- Close standard input immediately when no bytes are configured.
+        local
+            command: OS_COMMAND
+            process_result: OS_PROCESS_RESULT
+        do
+            create command.make (process_child_executable, child_arguments ("count-input"))
+            process_result := command.run
+            assert_integers_equal ("default input exit", 0, process_result.exit_code)
+            assert_strings_equal ("default input count", "0", process_result.stdout)
+        end
+
+    test_input_bytes_and_caller_snapshot
+            -- Preserve all STRING_8 bytes and do not retain the caller's string.
+        local
+            command: OS_COMMAND
+            process_result: OS_PROCESS_RESULT
+            bytes: STRING_8
+        do
+            create bytes.make_from_string ("before")
+            bytes.append_character ('%U')
+            bytes.append_code (255)
+            create command.make (process_child_executable, child_arguments ("input-codes"))
+            command.set_input (bytes)
+            bytes.wipe_out
+
+            process_result := command.run
+            assert_integers_equal ("byte input exit", 0, process_result.exit_code)
+            assert_strings_equal (
+                "byte input",
+                "8:98,101,102,111,114,101,0,255",
+                process_result.stdout
+            )
+        end
+
+    test_input_snapshot_for_overlapping_starts
+            -- Give each start the input configured at that start.
+        local
+            command: OS_COMMAND
+            first_process: OS_PROCESS
+            second_process: OS_PROCESS
+        do
+            create command.make (process_child_executable, child_arguments ("echo-input"))
+            command.set_input ("first input")
+            first_process := command.start
+            command.set_input ("second input")
+            second_process := command.start
+            first_process.wait
+            second_process.wait
+
+            assert_strings_equal ("first input snapshot", "first input", first_process.outcome.stdout)
+            assert_strings_equal ("second input snapshot", "second input", second_process.outcome.stdout)
+        end
+
+    test_large_duplex_input_and_output
+            -- Avoid deadlock when all three standard pipes exceed kernel capacity.
+        local
+            command: OS_COMMAND
+            process_result: OS_PROCESS_RESULT
+            bytes: STRING_8
+            output_byte_count: INTEGER
+        do
+            create bytes.make_filled ('i', large_block_size * large_block_count)
+            create command.make (process_child_executable, child_arguments ("duplex"))
+            command.set_input (bytes)
+            process_result := command.run
+            output_byte_count := large_block_size * large_block_count
+
+            assert_integers_equal ("duplex exit", 0, process_result.exit_code)
+            assert_integers_equal (
+                "duplex stdout count",
+                output_byte_count + bytes.count.out.count,
+                process_result.stdout.count
+            )
+            assert_strings_equal (
+                "duplex input count",
+                bytes.count.out,
+                process_result.stdout.substring (output_byte_count + 1, process_result.stdout.count)
+            )
+            assert_integers_equal ("duplex stderr count", output_byte_count, process_result.stderr.count)
+        end
+
+    test_early_input_close
+            -- Treat child exit during a large write as a normal broken pipe.
+        local
+            command: OS_COMMAND
+            process_result: OS_PROCESS_RESULT
+            bytes: STRING_8
+        do
+            create bytes.make_filled ('i', large_block_size * large_block_count)
+            create command.make (process_child_executable, child_arguments ("close-input"))
+            command.set_input (bytes)
+            process_result := command.run
+            assert_integers_equal ("early close exit", 0, process_result.exit_code)
+        end
+
+    test_shell_input
+            -- Feed configured input through a command created with `make_shell`.
+        local
+            command: OS_COMMAND
+            process_result: OS_PROCESS_RESULT
+        do
+            if {PLATFORM}.is_windows then
+                create command.make_shell ("findstr .")
+                command.set_input ("shell-input%R%N")
+            else
+                create command.make_shell ("cat")
+                command.set_input ("shell-input")
+            end
+            process_result := command.run
+            assert_integers_equal ("shell input exit", 0, process_result.exit_code)
+            assert_true ("shell input", process_result.stdout.has_substring ("shell-input"))
+        end
+
     test_wait_is_idempotent
             -- Permit clients to wait on a completed process more than once.
         local
@@ -201,8 +315,11 @@ feature -- Test
         local
             command: OS_COMMAND
             process: OS_PROCESS
+            bytes: STRING_8
         do
+            create bytes.make_filled ('i', large_block_size * large_block_count)
             create command.make (process_child_executable, child_arguments ("sleep"))
+            command.set_input (bytes)
             process := command.start
             process.terminate
             process.wait

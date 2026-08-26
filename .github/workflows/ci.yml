@@ -132,6 +132,10 @@ jobs:
       - name: Compile and test
         if: runner.os != 'Windows'
         run: make test-ise
+      - name: Build native library
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: .github\scripts\build-windows-c.cmd msvc library
       - name: Compile tests
         if: runner.os == 'Windows'
         shell: cmd

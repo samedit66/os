@@ -19,6 +19,7 @@ feature {NONE} -- Initialization
         do
             create executable.make_from_string_general (a_executable)
             create arguments.make (8)
+            create input.make_empty
             across a_arguments as argument loop
                 create argument_copy.make_from_string_general (argument)
                 arguments.extend (argument_copy)
@@ -36,6 +37,14 @@ feature {NONE} -- Initialization
         end
 
 feature -- Change
+
+    set_input (a_input: READABLE_STRING_8)
+            -- Use copied raw bytes as standard input for subsequent executions.
+        do
+            create input.make_from_string (a_input)
+        ensure
+            input_set: input.same_string (a_input)
+        end
 
     set_working_directory (a_directory: OS_FILE_PATH)
             -- Use a canonical snapshot of `a_directory` for subsequent executions.
@@ -61,7 +70,7 @@ feature -- Execution
     start: OS_PROCESS
             -- Start an independent execution without output handlers.
         do
-            create Result.make (executable, arguments, Void, Void, working_directory)
+            create Result.make (executable, arguments, Void, Void, working_directory, input)
         end
 
     start_with_handlers (
@@ -70,7 +79,7 @@ feature -- Execution
     ): OS_PROCESS
             -- Start an independent execution and forward output chunks.
         do
-            create Result.make (executable, arguments, a_stdout, a_stderr, working_directory)
+            create Result.make (executable, arguments, a_stdout, a_stderr, working_directory, input)
         end
 
 feature {NONE} -- Shell implementation
@@ -123,5 +132,8 @@ feature {NONE} -- Implementation
 
     working_directory: detachable STRING_32
             -- Canonical directory snapshot for subsequent executions.
+
+    input: STRING_8
+            -- Raw standard-input bytes for subsequent executions.
 
 end

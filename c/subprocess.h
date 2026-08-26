@@ -15,6 +15,8 @@ os_process *os_process_start(
 );
 int os_process_read_stdout(os_process *process, void *buffer, int capacity);
 int os_process_read_stderr(os_process *process, void *buffer, int capacity);
+int os_process_write_stdin(os_process *process, const void *buffer, int capacity);
+int os_process_close_stdin(os_process *process);
 int os_process_poll(os_process *process, int *finished, int *exit_code);
 int os_process_wait(os_process *process, int *exit_code);
 int os_process_terminate(os_process *process);

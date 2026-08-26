@@ -37,7 +37,7 @@ gobo: native
 	GOBO_EIFFEL=ge ZIG_GLOBAL_CACHE_DIR=$(PROJECT_ROOT)/build/zig-global-cache ZIG_LOCAL_CACHE_DIR=$(PROJECT_ROOT)/build/zig-local-cache $(GEC) $(GOBO_FLAGS) --target=application os.ecf
 	./os_process_example
 
-ise:
+ise: native
 	GOBO_EIFFEL=ise $(EC) -batch -clean -config os.ecf -target application -c_compile
 	./EIFGENs/application/W_code/os_process_example
 
@@ -51,7 +51,7 @@ test-gobo: native generate-tests
 	GOBO="$(GOBO)" GOBO_EIFFEL=ge ZIG_GLOBAL_CACHE_DIR=$(PROJECT_ROOT)/build/zig-global-cache ZIG_LOCAL_CACHE_DIR=$(PROJECT_ROOT)/build/zig-local-cache $(GEC) $(GOBO_FLAGS) --target=os_tests os.ecf
 	./os_tests -D "process_child=$(PROJECT_ROOT)/os_process_test_child"
 
-test-ise: generate-tests
+test-ise: native generate-tests
 	GOBO="$(GOBO)" GOBO_EIFFEL=ise $(EC) -batch -clean -config os.ecf -target os_process_test_child -finalize -keep -c_compile
 	GOBO="$(GOBO)" GOBO_EIFFEL=ise $(EC) -batch -clean -config os.ecf -target os_tests -finalize -keep -c_compile
 	./EIFGENs/os_tests/F_code/os_tests -D "process_child=$(PROJECT_ROOT)/EIFGENs/os_process_test_child/F_code/os_process_test_child"

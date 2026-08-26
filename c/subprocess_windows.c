@@ -15,6 +15,7 @@
 
 struct os_process {
     HANDLE process;
+    HANDLE stdin_write;
     HANDLE stdout_read;
     HANDLE stderr_read;
     int exit_code;
@@ -151,7 +152,7 @@ os_process *os_process_start(
     SECURITY_ATTRIBUTES security = {sizeof(security), NULL, TRUE};
     HANDLE stdout_read = NULL, stdout_write = NULL;
     HANDLE stderr_read = NULL, stderr_write = NULL;
-    HANDLE stdin_read = NULL;
+    HANDLE stdin_read = NULL, stdin_write = NULL;
     STARTUPINFOEXW startup = {0};
     PROCESS_INFORMATION information = {0};
     SIZE_T attributes_size = 0;
@@ -173,22 +174,15 @@ os_process *os_process_start(
         working_directory_wide = utf8_to_wide(working_directory, error_code);
         if (working_directory_wide == NULL) goto fail;
     }
-    if (!CreatePipe(&stdout_read, &stdout_write, &security, 0) ||
+    if (!CreatePipe(&stdin_read, &stdin_write, &security, 0) ||
+        !SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0) ||
+        !CreatePipe(&stdout_read, &stdout_write, &security, 0) ||
         !SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0) ||
         !CreatePipe(&stderr_read, &stderr_write, &security, 0) ||
         !SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0)) {
         windows_error = GetLastError();
         goto fail;
     }
-    stdin_read = CreateFileW(
-        L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-        &security, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL
-    );
-    if (stdin_read == INVALID_HANDLE_VALUE) {
-        windows_error = GetLastError();
-        goto fail;
-    }
-
     ZeroMemory(&startup, sizeof(startup));
     startup.StartupInfo.cb = sizeof(startup);
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
@@ -235,9 +229,11 @@ os_process *os_process_start(
         goto fail;
     }
     process->process = information.hProcess;
+    process->stdin_write = stdin_write;
     process->stdout_read = stdout_read;
     process->stderr_read = stderr_read;
     process->exit_code = -1;
+    stdin_write = NULL;
     stdout_read = NULL;
     stderr_read = NULL;
 
@@ -253,6 +249,7 @@ fail:
     close_handle(&stderr_read);
     close_handle(&stderr_write);
     close_handle(&stdin_read);
+    close_handle(&stdin_write);
     if (process == NULL && windows_error != ERROR_SUCCESS) {
         *error_code = error_as_int(windows_error);
     }
@@ -281,6 +278,32 @@ int os_process_read_stderr(os_process *process, void *buffer, int capacity)
 {
     return process == NULL ? -ERROR_INVALID_PARAMETER :
         read_handle(process->stderr_read, buffer, capacity);
+}
+
+int os_process_write_stdin(os_process *process, const void *buffer, int capacity)
+{
+    DWORD count = 0;
+    DWORD error;
+    if (process == NULL || buffer == NULL || capacity <= 0) {
+        return -ERROR_INVALID_PARAMETER;
+    }
+    if (process->stdin_write == NULL) return 0;
+    if (!WriteFile(process->stdin_write, buffer, (DWORD)capacity, &count, NULL)) {
+        error = GetLastError();
+        return error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA ?
+            0 : -error_as_int(error);
+    }
+    return (int)count;
+}
+
+int os_process_close_stdin(os_process *process)
+{
+    HANDLE handle;
+    if (process == NULL) return ERROR_INVALID_PARAMETER;
+    if (process->stdin_write == NULL) return 0;
+    handle = process->stdin_write;
+    process->stdin_write = NULL;
+    return CloseHandle(handle) ? 0 : error_as_int(GetLastError());
 }
 
 static int store_exit_code(os_process *process, int *exit_code)
@@ -336,6 +359,7 @@ int os_process_terminate(os_process *process)
 void os_process_free(os_process *process)
 {
     if (process != NULL) {
+        close_handle(&process->stdin_write);
         close_handle(&process->stdout_read);
         close_handle(&process->stderr_read);
         close_handle(&process->process);

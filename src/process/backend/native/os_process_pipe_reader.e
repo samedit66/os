@@ -104,10 +104,10 @@ feature {NONE} -- Reading
 feature {NONE} -- Native bridge
 
     c_read_stdout (a_process, a_buffer: POINTER; a_capacity: INTEGER): INTEGER
-        external "C use <subprocess.h>" alias "os_process_read_stdout" end
+        external "C blocking use <subprocess.h>" alias "os_process_read_stdout" end
 
     c_read_stderr (a_process, a_buffer: POINTER; a_capacity: INTEGER): INTEGER
-        external "C use <subprocess.h>" alias "os_process_read_stderr" end
+        external "C blocking use <subprocess.h>" alias "os_process_read_stderr" end
 
 feature {NONE} -- Implementation
 

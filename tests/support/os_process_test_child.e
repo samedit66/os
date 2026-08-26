@@ -41,6 +41,17 @@ feature {NONE} -- Child modes
                 io.error.put_string ("stderr-data")
             elseif mode.same_string_general ("large") then
                 emit_large_output
+            elseif mode.same_string_general ("echo-input") then
+                io.put_string (read_input)
+            elseif mode.same_string_general ("input-codes") then
+                emit_input_codes
+            elseif mode.same_string_general ("count-input") then
+                io.put_integer (read_input.count)
+            elseif mode.same_string_general ("duplex") then
+                emit_large_output
+                io.put_integer (read_input.count)
+            elseif mode.same_string_general ("close-input") then
+                -- Exit without reading so the parent observes a normal broken pipe.
             elseif mode.same_string_general ("working-directory") then
                 create environment
                 io.put_string (utf_8 (environment.current_working_path.name))
@@ -92,6 +103,41 @@ feature {NONE} -- Child modes
             end
         end
 
+    read_input: STRING_8
+            -- Read standard input as bytes until EOF.
+        do
+            create Result.make_empty
+            from
+            until
+                io.input.end_of_file
+            loop
+                io.input.read_stream (input_block_size)
+                Result.append (io.input.last_string)
+            end
+        end
+
+    emit_input_codes
+            -- Serialize standard-input bytes without writing embedded NULs.
+        local
+            input: STRING_8
+            index: INTEGER
+        do
+            input := read_input
+            io.put_integer (input.count)
+            io.put_character (':')
+            from
+                index := 1
+            until
+                index > input.count
+            loop
+                if index > 1 then
+                    io.put_character (',')
+                end
+                io.put_integer (input.code (index).to_integer_32)
+                index := index + 1
+            end
+        end
+
 feature {NONE} -- Conversion
 
     utf_8 (a_text: READABLE_STRING_GENERAL): STRING_8
@@ -105,5 +151,7 @@ feature {NONE} -- Constants
     large_block_size: INTEGER = 4096
 
     large_block_count: INTEGER = 128
+
+    input_block_size: INTEGER = 4096
 
 end

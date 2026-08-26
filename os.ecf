@@ -15,35 +15,26 @@
         <library name="ise_base" location="$ISE_LIBRARY/library/base/base.ecf">
             <condition><custom name="GOBO_EIFFEL" excluded_value="ge"/></condition>
         </library>
-        <library name="ise_process" location="$ISE_LIBRARY/library/process/process.ecf">
+        <library name="ise_thread" location="$ISE_LIBRARY/library/thread/thread.ecf">
             <condition><custom name="GOBO_EIFFEL" excluded_value="ge"/></condition>
         </library>
         <library name="gobo_thread" location="${GOBO}/library/thread/library_${GOBO_EIFFEL}.ecf">
             <condition><custom name="GOBO_EIFFEL" value="ge"/></condition>
         </library>
-        <external_include location="$ECF_CONFIG_PATH/c">
-            <condition><custom name="GOBO_EIFFEL" value="ge"/></condition>
-        </external_include>
+        <external_include location="$ECF_CONFIG_PATH/c"/>
         <external_library location="$ECF_CONFIG_PATH/build/native/libos_process.a">
             <condition>
-                <custom name="GOBO_EIFFEL" value="ge"/>
                 <platform excluded_value="windows"/>
             </condition>
         </external_library>
         <external_library location="$ECF_CONFIG_PATH/build/native/os_process.lib">
             <condition>
-                <custom name="GOBO_EIFFEL" value="ge"/>
                 <platform value="windows"/>
             </condition>
         </external_library>
         <cluster name="process" location="src/process" recursive="false"/>
         <cluster name="file_path" location="src/file_path" recursive="false"/>
-        <cluster name="process_native" location="src/process/backend/native" recursive="true">
-            <condition><custom name="GOBO_EIFFEL" value="ge"/></condition>
-        </cluster>
-        <cluster name="process_ise" location="src/process/backend/ise" recursive="true">
-            <condition><custom name="GOBO_EIFFEL" excluded_value="ge"/></condition>
-        </cluster>
+        <cluster name="process_native" location="src/process/backend/native" recursive="true"/>
     </target>
     <target name="application" extends="os">
         <root class="APPLICATION" feature="make"/>

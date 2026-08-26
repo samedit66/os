@@ -10,7 +10,8 @@ feature {NONE} -- Initialization
         a_executable: READABLE_STRING_GENERAL;
         a_arguments: ITERABLE [READABLE_STRING_GENERAL];
         a_stdout: detachable PROCEDURE [READABLE_STRING_8];
-        a_stderr: detachable PROCEDURE [READABLE_STRING_8]
+        a_stderr: detachable PROCEDURE [READABLE_STRING_8];
+        a_working_directory: detachable READABLE_STRING_GENERAL
     )
             -- Launch an EiffelStudio `PROCESS`.
         local
@@ -25,14 +26,18 @@ feature {NONE} -- Initialization
             executable_name := resolved_executable (a_executable)
             if {PLATFORM}.is_windows then
                 implementation := factory.process_launcher_with_command_line (
-                    windows_command_line (executable_name, a_arguments), Void
+                    windows_command_line (executable_name, a_arguments), a_working_directory
                 )
             else
-                implementation := factory.process_launcher (executable_name, a_arguments, Void)
+                implementation := factory.process_launcher (
+                    executable_name, a_arguments, a_working_directory
+                )
             end
-            implementation.redirect_output_to_agent (agent receive_stdout)
-            implementation.redirect_error_to_agent (agent receive_stderr)
-            implementation.launch
+            if is_usable_working_directory (a_working_directory) then
+                implementation.redirect_output_to_agent (agent receive_stdout)
+                implementation.redirect_error_to_agent (agent receive_stderr)
+                implementation.launch
+            end
             if not implementation.launched then
                 exit_status := command_launch_failure
                 complete
@@ -103,6 +108,24 @@ feature {NONE} -- Completion
         ensure
             finished: finished
             result_available: attached process_result
+        end
+
+feature {NONE} -- Launch support
+
+    is_usable_working_directory (
+        a_working_directory: detachable READABLE_STRING_GENERAL
+    ): BOOLEAN
+            -- Is `a_working_directory` absent or currently an existing directory?
+        local
+            file_info: FILE_INFO
+        do
+            if attached a_working_directory as directory then
+                create file_info.make
+                file_info.update (directory)
+                Result := file_info.exists and then file_info.is_directory
+            else
+                Result := True
+            end
         end
 
 feature {NONE} -- Executable lookup

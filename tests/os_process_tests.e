@@ -4,7 +4,9 @@ class
 inherit
     TS_TEST_CASE
         redefine
-            initialize
+            initialize,
+            set_up,
+            tear_down
         end
 
 create
@@ -17,6 +19,20 @@ feature {NONE} -- Initialization
         do
             create callback_stdout.make_empty
             create callback_stderr.make_empty
+        end
+
+feature -- Execution
+
+    set_up
+            -- Reserve a unique absent path for one test.
+        do
+            test_root := new_test_root
+        end
+
+    tear_down
+            -- Remove the test tree after success or failure.
+        do
+            cleanup
         end
 
 feature -- Test
@@ -126,6 +142,23 @@ feature -- Test
             assert_integers_equal ("missing command", 127, process_result.exit_code)
             assert_true ("missing stdout", process_result.stdout.is_empty)
             assert_true ("missing stderr", process_result.stderr.is_empty)
+        end
+
+    test_missing_working_directory
+            -- Represent an unavailable working directory as a launch failure.
+        local
+            command: OS_COMMAND
+            process_result: OS_PROCESS_RESULT
+        do
+            create command.make (
+                process_child_executable,
+                child_arguments ("working-directory")
+            )
+            command.set_working_directory (current_test_root)
+            process_result := command.run
+            assert_integers_equal ("missing working directory", 127, process_result.exit_code)
+            assert_true ("missing directory stdout", process_result.stdout.is_empty)
+            assert_true ("missing directory stderr", process_result.stderr.is_empty)
         end
 
     test_path_lookup
@@ -250,6 +283,113 @@ feature -- Test
             assert_strings_equal ("second overlapping output", "stdout-data", second_process.outcome.stdout)
         end
 
+    test_inherited_working_directory
+            -- Inherit the parent working directory when none is configured.
+        local
+            command: OS_COMMAND
+            process_result: OS_PROCESS_RESULT
+            environment: EXECUTION_ENVIRONMENT
+        do
+            create environment
+            create command.make (
+                process_child_executable,
+                child_arguments ("working-directory")
+            )
+            process_result := command.run
+            assert_strings_equal (
+                "inherited working directory",
+                utf_8 (environment.current_working_path.name),
+                process_result.stdout
+            )
+        end
+
+    test_working_directory_snapshot
+            -- Apply later directory changes only to subsequent executions.
+        local
+            command: OS_COMMAND
+            process: OS_PROCESS
+            first_result: OS_PROCESS_RESULT
+            second_result: OS_PROCESS_RESULT
+            first_directory: OS_FILE_PATH
+            second_directory: OS_FILE_PATH
+        do
+            first_directory := current_test_root / "first directory"
+            second_directory := current_test_root / "second directory"
+            first_directory.create_directory
+            second_directory.create_directory
+            create command.make (
+                process_child_executable,
+                child_arguments ("working-directory")
+            )
+
+            command.set_working_directory (first_directory)
+            process := command.start
+            command.set_working_directory (second_directory)
+            process.wait
+            first_result := process.outcome
+            second_result := command.run
+
+            assert_strings_equal (
+                "started working directory",
+                utf_8 (first_directory.canonical_path.name),
+                first_result.stdout
+            )
+            assert_strings_equal (
+                "updated working directory",
+                utf_8 (second_directory.canonical_path.name),
+                second_result.stdout
+            )
+        end
+
+    test_relative_working_directory_snapshot
+            -- Resolve a relative directory when it is configured, not when launched.
+        local
+            command: OS_COMMAND
+            process: OS_PROCESS
+            relative_directory: OS_FILE_PATH
+            changed_directory: PATH
+            environment: detachable EXECUTION_ENVIRONMENT
+            original_directory: detachable PATH
+            parent_changed: BOOLEAN
+        do
+            current_test_root.create_directory
+            create environment
+            original_directory := environment.current_working_path
+            create relative_directory.make (".")
+            create command.make (
+                process_child_executable,
+                child_arguments ("working-directory")
+            )
+            command.set_working_directory (relative_directory)
+
+            create changed_directory.make_from_string (current_test_root.name)
+            environment.change_working_path (changed_directory)
+            parent_changed := environment.return_code = 0
+            assert_true ("parent directory changed", parent_changed)
+            process := command.start
+            if attached original_directory as original then
+                environment.change_working_path (original)
+                parent_changed := environment.return_code /= 0
+                assert_false ("parent directory restored", parent_changed)
+                process.wait
+                assert_strings_equal (
+                    "relative directory snapshot",
+                    utf_8 (original.canonical_path.name),
+                    process.outcome.stdout
+                )
+            else
+                assert_true ("original directory attached", False)
+            end
+        rescue
+            if
+                parent_changed and then
+                attached environment as saved_environment and then
+                attached original_directory as saved_directory
+            then
+                saved_environment.change_working_path (saved_directory)
+            end
+        end
+
     test_polled_result
             -- Make the complete result available through polling alone.
         local
@@ -314,11 +454,59 @@ feature {NONE} -- Support
             Result.extend (a_mode)
         end
 
+    current_test_root: OS_FILE_PATH
+            -- Root reserved for the current test.
+        require
+            test_root_attached: attached test_root
+        do
+            check attached test_root as root then
+                Result := root
+            end
+        end
+
+    new_test_root: OS_FILE_PATH
+            -- Unique absent path reserved for this test run.
+        local
+            environment: EXECUTION_ENVIRONMENT
+            temporary_file: PLAIN_TEXT_FILE
+            prefix: IMMUTABLE_STRING_32
+            root_path: PATH
+        do
+            create environment
+            prefix := environment.current_working_path.extended ("os-process-tests-").name
+            create temporary_file.make_open_temporary_with_prefix (prefix)
+            root_path := temporary_file.path
+            temporary_file.close
+            temporary_file.delete
+            create Result.make_from_path (root_path)
+        ensure
+            absent: not Result.exists
+        end
+
+    cleanup
+            -- Remove the test tree if one has been reserved.
+        do
+            if attached test_root as root then
+                root.delete_recursively
+                test_root := Void
+            end
+        ensure
+            test_root_detached: test_root = Void
+        end
+
+    utf_8 (a_text: READABLE_STRING_GENERAL): STRING_8
+            -- UTF-8 representation of `a_text`.
+        do
+            Result := {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (a_text)
+        end
+
 feature {NONE} -- State
 
     callback_stdout: STRING_8
 
     callback_stderr: STRING_8
+
+    test_root: detachable OS_FILE_PATH
 
 feature {NONE} -- Constants
 

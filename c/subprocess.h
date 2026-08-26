@@ -10,6 +10,7 @@ typedef struct os_process os_process;
 os_process *os_process_start(
     const char *executable,
     char *const arguments[],
+    const char *working_directory,
     int *error_code
 );
 int os_process_read_stdout(os_process *process, void *buffer, int capacity);

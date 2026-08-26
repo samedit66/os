@@ -10,7 +10,8 @@ feature {NONE} -- Initialization
         a_executable: READABLE_STRING_GENERAL;
         a_arguments: ITERABLE [READABLE_STRING_GENERAL];
         a_stdout: detachable PROCEDURE [READABLE_STRING_8];
-        a_stderr: detachable PROCEDURE [READABLE_STRING_8]
+        a_stderr: detachable PROCEDURE [READABLE_STRING_8];
+        a_working_directory: detachable READABLE_STRING_GENERAL
     )
             -- Launch the native process and its two Eiffel readers.
         local
@@ -18,8 +19,10 @@ feature {NONE} -- Initialization
             argument_strings: ARRAYED_LIST [C_STRING]
             argument_vector: MANAGED_POINTER
             error_area: MANAGED_POINTER
+            working_directory_c: detachable C_STRING
             out_reader: OS_PROCESS_PIPE_READER
             err_reader: OS_PROCESS_PIPE_READER
+            working_directory_pointer: POINTER
             offset: INTEGER
         do
             create stdout_snapshot.make_empty
@@ -38,8 +41,17 @@ feature {NONE} -- Initialization
             end
             argument_vector.put_pointer (default_pointer, offset)
 
+            if attached a_working_directory as directory then
+                create working_directory_c.make (utf_8 (directory))
+                working_directory_pointer := working_directory_c.item
+            end
             create error_area.make ({PLATFORM}.integer_32_bytes)
-            native_handle := c_start (executable_c.item, argument_vector.item, error_area.item)
+            native_handle := c_start (
+                executable_c.item,
+                argument_vector.item,
+                working_directory_pointer,
+                error_area.item
+            )
             if native_handle = default_pointer then
                 if c_is_command_error (error_area.read_integer_32 (0)) then
                     exit_status := command_launch_failure
@@ -236,7 +248,7 @@ feature {NONE} -- Error handling
 
 feature {NONE} -- Native bridge
 
-    c_start (a_executable, a_arguments, a_error: POINTER): POINTER
+    c_start (a_executable, a_arguments, a_working_directory, a_error: POINTER): POINTER
         external "C use <subprocess.h>" alias "os_process_start" end
 
     c_poll (a_process, a_finished, a_exit_code: POINTER): INTEGER

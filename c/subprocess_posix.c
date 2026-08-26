@@ -1,5 +1,13 @@
 #ifndef _WIN32
 
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE
+#endif
+
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -42,6 +50,21 @@ static int set_close_on_exec(int fd)
     return 0;
 }
 
+#if defined(__APPLE__) && defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+static int add_working_directory_action(
+    posix_spawn_file_actions_t *actions,
+    const char *working_directory
+)
+{
+    return posix_spawn_file_actions_addchdir_np(actions, working_directory);
+}
+#if defined(__APPLE__) && defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+
 static int decoded_exit_code(int status)
 {
     if (WIFEXITED(status)) {
@@ -56,6 +79,7 @@ static int decoded_exit_code(int status)
 os_process *os_process_start(
     const char *executable,
     char *const arguments[],
+    const char *working_directory,
     int *error_code
 )
 {
@@ -100,6 +124,9 @@ os_process *os_process_start(
     ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stderr_pipe[0]));
     ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdout_pipe[1]));
     ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stderr_pipe[1]));
+    if (working_directory != NULL) {
+        ADD_ACTION(add_working_directory_action(&actions, working_directory));
+    }
 #undef ADD_ACTION
 
     result = posix_spawnp(&pid, executable, &actions, NULL, arguments, environ);
@@ -220,7 +247,8 @@ void os_process_free(os_process *process)
 
 int os_process_is_command_error(int error_code)
 {
-    return error_code == ENOENT || error_code == EACCES || error_code == ENOEXEC;
+    return error_code == ENOENT || error_code == ENOTDIR ||
+        error_code == EACCES || error_code == ENOEXEC;
 }
 
 #endif

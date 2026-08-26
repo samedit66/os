@@ -41,6 +41,9 @@ feature {NONE} -- Child modes
                 io.error.put_string ("stderr-data")
             elseif mode.same_string_general ("large") then
                 emit_large_output
+            elseif mode.same_string_general ("working-directory") then
+                create environment
+                io.put_string (utf_8 (environment.current_working_path.name))
             elseif mode.same_string_general ("sleep") then
                 create environment
                 environment.sleep (10_000_000_000)
@@ -87,6 +90,14 @@ feature {NONE} -- Child modes
                 io.error.put_string (stderr_block)
                 index := index + 1
             end
+        end
+
+feature {NONE} -- Conversion
+
+    utf_8 (a_text: READABLE_STRING_GENERAL): STRING_8
+            -- UTF-8 representation of `a_text`.
+        do
+            Result := {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (a_text)
         end
 
 feature {NONE} -- Constants

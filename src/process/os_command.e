@@ -35,6 +35,17 @@ feature {NONE} -- Initialization
             make (shell_executable, shell_arguments (a_command))
         end
 
+feature -- Change
+
+    set_working_directory (a_directory: OS_FILE_PATH)
+            -- Use a canonical snapshot of `a_directory` for subsequent executions.
+        do
+            working_directory := a_directory.canonical_path.name.to_string_32
+        ensure
+            working_directory_set: attached working_directory as directory and then
+                directory.same_string (a_directory.canonical_path.name)
+        end
+
 feature -- Execution
 
     run: OS_PROCESS_RESULT
@@ -50,7 +61,7 @@ feature -- Execution
     start: OS_PROCESS
             -- Start an independent execution without output handlers.
         do
-            create Result.make (executable, arguments, Void, Void)
+            create Result.make (executable, arguments, Void, Void, working_directory)
         end
 
     start_with_handlers (
@@ -59,7 +70,7 @@ feature -- Execution
     ): OS_PROCESS
             -- Start an independent execution and forward output chunks.
         do
-            create Result.make (executable, arguments, a_stdout, a_stderr)
+            create Result.make (executable, arguments, a_stdout, a_stderr, working_directory)
         end
 
 feature {NONE} -- Shell implementation
@@ -109,5 +120,8 @@ feature {NONE} -- Implementation
 
     arguments: ARRAYED_LIST [STRING_32]
             -- Copied argument vector.
+
+    working_directory: detachable STRING_32
+            -- Canonical directory snapshot for subsequent executions.
 
 end

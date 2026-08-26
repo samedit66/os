@@ -35,6 +35,7 @@ without hiding the places where operating systems genuinely behave differently.
   and termination.
 - Safe argument-vector execution that does not construct a shell command.
 - An explicit shell helper for commands that require platform shell syntax.
+- Per-command working directories with reusable configuration snapshots.
 - Portable path composition, inspection, text I/O, directory creation, and
   recursive deletion.
 - Void-safe interfaces with contracts and no compiler conditionals in client
@@ -67,6 +68,13 @@ matrix:
 > The `os` EiffelStudio backend works around this limitation using the Microsoft
 > C runtime argument-parsing rules. Callers should pass unescaped arguments to
 > `OS_COMMAND.make`; no application-level workaround is needed.
+
+> [!CAUTION]
+> On Unix, the EiffelStudio `PROCESS` backend implements a child working
+> directory by temporarily changing the parent process directory around
+> `fork`. Concurrent EiffelStudio starts with different working directories
+> can therefore race. The Gobo native backend applies the directory only in
+> the child process and does not have this limitation.
 
 File-path operations use the common EiffelBase/FreeELKS `PATH`, `FILE_INFO`,
 `DIRECTORY`, and file classes. They do not need a compiler-specific backend.
@@ -135,6 +143,20 @@ can be reused for sequential or overlapping executions even if the caller later
 modifies the original strings or collection. `run` passes the stored argument
 vector directly to the child process. Spaces, quotes, backslashes, and empty
 arguments do not require shell escaping.
+
+Set an optional working directory before starting the command:
+
+```eiffel
+create repository.make ("/path/to/repository")
+create command.make ("git", << "status", "--short" >>)
+command.set_working_directory (repository)
+process_result := command.run
+```
+
+The command stores an absolute canonical snapshot of the directory when
+`set_working_directory` is called. Changing the command later affects only
+subsequent executions; an already created `OS_PROCESS` retains its original
+directory.
 
 ### Stream process output
 
@@ -244,6 +266,6 @@ clang-cl.
 ## Scope
 
 The process API deliberately focuses on the common portable workflow. For
-advanced EiffelStudio-only features such as custom standard input, working
-directories, environment replacement, timeouts, process trees, or detailed
+advanced EiffelStudio-only features such as custom standard input, environment
+replacement, timeouts, process trees, or detailed
 redirection control, use the EiffelStudio `PROCESS` library directly.

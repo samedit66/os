@@ -95,7 +95,7 @@ feature -- Basic operations
         require
             readable_file: is_plain_file
         local
-            file: PLAIN_TEXT_FILE
+            file: detachable PLAIN_TEXT_FILE
         do
             create Result.make_empty
             create file.make_with_path (path)
@@ -108,6 +108,10 @@ feature -- Basic operations
                 Result.append (file.last_string)
             end
             file.close
+        rescue
+            if attached file as opened_file and then not opened_file.is_closed then
+                opened_file.close
+            end
         end
 
     create_directory
@@ -131,7 +135,7 @@ feature -- Basic operations
         require
             writable_target: not exists or else is_plain_file
         local
-            file: PLAIN_TEXT_FILE
+            file: detachable PLAIN_TEXT_FILE
         do
             create file.make_with_path (path)
             file.open_write
@@ -139,6 +143,10 @@ feature -- Basic operations
             file.close
         ensure
             file_exists: is_plain_file
+        rescue
+            if attached file as opened_file and then not opened_file.is_closed then
+                opened_file.close
+            end
         end
 
     delete_recursively

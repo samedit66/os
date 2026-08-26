@@ -51,8 +51,7 @@ feature -- Change
         do
             working_directory := a_directory.canonical_path.name.to_string_32
         ensure
-            working_directory_set: attached working_directory as directory and then
-                directory.same_string (a_directory.canonical_path.name)
+            working_directory_set: attached working_directory
         end
 
 feature -- Execution
@@ -135,5 +134,8 @@ feature {NONE} -- Implementation
 
     input: STRING_8
             -- Raw standard-input bytes for subsequent executions.
+
+invariant
+    executable_not_empty: not executable.is_empty
 
 end

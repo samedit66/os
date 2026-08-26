@@ -134,6 +134,11 @@ modifies the original strings or collection. `run` passes the stored argument
 vector directly to the child process. Spaces, quotes, backslashes, and empty
 arguments do not require shell escaping.
 
+If the executable or working directory cannot be used, `run` returns a result
+with `was_launched` false and the conventional synthetic exit code 127. A child
+that actually exits with code 127 has `was_launched` true, so the two cases are
+unambiguous.
+
 Set an optional working directory before starting the command:
 
 ```eiffel
@@ -183,13 +188,42 @@ do
 end
 ```
 
-The process provides `is_finished`, `wait`, `terminate`, and `outcome`.
+The process provides `poll`, `is_finished`, `wait`, `terminate`, and `outcome`.
+`poll` is a nonblocking command that advances process state; `is_finished` only
+observes the state already recorded by `poll` or `wait`. For example:
+
+```eiffel
+local
+    environment: EXECUTION_ENVIRONMENT
+do
+    create environment
+    from
+        process.poll
+    until
+        process.is_finished
+    loop
+        environment.sleep (1_000_000)
+        process.poll
+    end
+    process_result := process.outcome
+end
+```
+
+Every started process must be driven to completion through `wait` or repeated
+`poll` calls. `terminate` only requests platform-dependent termination, so it
+must also be followed by `wait` or polling. The library does not run an
+automatic background reaper.
+
 `is_finished` becomes true only after the child, both output readers, and the
-input writer have finished, so `outcome` is then available without a separate
-`wait`. Output callbacks may run concurrently and should return quickly;
-ordering is preserved within each stream, not between standard output and
-standard error. Both streams are exposed as raw `STRING_8` byte sequences; the
-library does not impose an output encoding.
+input writer have finished and native resources have been released. Output
+callbacks may run concurrently and should return quickly; ordering is preserved
+within each stream, not between standard output and standard error. If a
+callback raises an exception, that handler is disabled, all pipes are still
+drained, and the failure is reported after cleanup by `poll`, `wait`, or
+`outcome`.
+
+Both streams are exposed as immutable snapshots through `READABLE_STRING_8`.
+They contain raw bytes; the library does not impose an output encoding.
 
 For commands that intentionally require a shell, use the separate helper:
 

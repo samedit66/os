@@ -86,7 +86,7 @@ feature {NONE} -- Initialization
 feature -- Access
 
     outcome: OS_PROCESS_RESULT
-            -- Completed execution outcome.
+            -- Completed execution outcome, or the retained worker failure.
         require
             finished: is_finished
         do
@@ -99,7 +99,7 @@ feature -- Access
 feature -- Status report
 
     is_finished: BOOLEAN
-            -- Is execution complete and its result available?
+            -- Is terminal state available without further polling?
         do
             Result := finished
         ensure

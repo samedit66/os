@@ -58,7 +58,8 @@ feature {NONE} -- Initialization
                 if c_is_command_error (error_area.read_integer_32 (0)) then
                     exit_status := command_launch_failure
                     process_exited := True
-                    complete
+                    create process_result.make_launch_failure
+                    finished := True
                 else
                     raise_native_failure ("Cannot start process", error_area.read_integer_32 (0))
                 end
@@ -208,7 +209,7 @@ feature {NONE} -- Completion
                     c_free (native_handle)
                     native_handle := default_pointer
                 end
-                create process_result.make (exit_status, stdout_snapshot, stderr_snapshot)
+                create process_result.make_launched (exit_status, stdout_snapshot, stderr_snapshot)
                 finished := True
             end
         ensure

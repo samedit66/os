@@ -71,8 +71,22 @@ feature -- Test
         do
             create command.make (process_child_executable, child_arguments ("exit-seven"))
             process_result := command.run
+            assert_true ("nonzero child launched", process_result.was_launched)
             assert_integers_equal ("nonzero exit", 7, process_result.exit_code)
             assert_false ("nonzero successful", process_result.successful)
+        end
+
+    test_child_exit_127
+            -- Distinguish a child exit code 127 from a launch failure.
+        local
+            command: OS_COMMAND
+            process_result: OS_PROCESS_RESULT
+        do
+            create command.make (process_child_executable, child_arguments ("exit-127"))
+            process_result := command.run
+            assert_true ("exit 127 child launched", process_result.was_launched)
+            assert_integers_equal ("exit 127 code", 127, process_result.exit_code)
+            assert_false ("exit 127 unsuccessful", process_result.successful)
         end
 
     test_streaming_callbacks
@@ -253,6 +267,7 @@ feature -- Test
                 create {ARRAYED_LIST [READABLE_STRING_GENERAL]}.make (0)
             )
             process_result := command.run
+            assert_false ("missing command not launched", process_result.was_launched)
             assert_integers_equal ("missing command", 127, process_result.exit_code)
             assert_true ("missing stdout", process_result.stdout.is_empty)
             assert_true ("missing stderr", process_result.stderr.is_empty)
@@ -270,6 +285,7 @@ feature -- Test
             )
             command.set_working_directory (current_test_root)
             process_result := command.run
+            assert_false ("missing directory not launched", process_result.was_launched)
             assert_integers_equal ("missing working directory", 127, process_result.exit_code)
             assert_true ("missing directory stdout", process_result.stdout.is_empty)
             assert_true ("missing directory stderr", process_result.stderr.is_empty)

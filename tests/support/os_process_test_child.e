@@ -36,6 +36,8 @@ feature {NONE} -- Child modes
                 emit_arguments (a_arguments)
             elseif mode.same_string_general ("exit-seven") then
                 exceptions.die (7)
+            elseif mode.same_string_general ("exit-127") then
+                exceptions.die (127)
             elseif mode.same_string_general ("emit") then
                 io.put_string ("stdout-data")
                 io.error.put_string ("stderr-data")

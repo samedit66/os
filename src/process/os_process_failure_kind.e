@@ -190,17 +190,17 @@ feature {OS_PROCESS_FAILURE_KIND} -- Implementation
 
 feature {NONE} -- Constants
 
-    launch_code: INTEGER = 1
-    stdin_write_code: INTEGER = 2
-    stdin_close_code: INTEGER = 3
-    stdout_read_code: INTEGER = 4
-    stderr_read_code: INTEGER = 5
-    stdout_handler_code: INTEGER = 6
-    stderr_handler_code: INTEGER = 7
-    poll_code: INTEGER = 8
-    wait_code: INTEGER = 9
-    termination_code: INTEGER = 10
-    worker_initialization_code: INTEGER = 11
+    launch_code,
+    stdin_write_code,
+    stdin_close_code,
+    stdout_read_code,
+    stderr_read_code,
+    stdout_handler_code,
+    stderr_handler_code,
+    poll_code,
+    wait_code,
+    termination_code,
+    worker_initialization_code: INTEGER = unique
 
 invariant
     known_category:

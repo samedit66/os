@@ -1,3 +1,11 @@
+note
+    description: "[
+        Internal worker that writes configured input bytes to a native
+        process and closes its standard-input pipe.
+    ]"
+    author: "samedit66 <samedit66@yandex.ru>"
+    library: "os"
+
 class
     OS_PROCESS_PIPE_WRITER
 

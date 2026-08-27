@@ -1,3 +1,8 @@
+note
+    description: "Test worker that invokes one command lifecycle operation."
+    author: "samedit66 <samedit66@yandex.ru>"
+    library: "os"
+
 class
     OS_COMMAND_LIFECYCLE_CALLER
 

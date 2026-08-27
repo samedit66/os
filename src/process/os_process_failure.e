@@ -1,3 +1,11 @@
+note
+    description: "[
+        Immutable description of one process-library failure, with a portable
+        category and an optional native error code.
+    ]"
+    author: "samedit66 <samedit66@yandex.ru>"
+    library: "os"
+
 class
     OS_PROCESS_FAILURE
 

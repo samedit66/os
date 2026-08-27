@@ -1,3 +1,8 @@
+note
+    description: "Test worker that repeatedly reads a file using one encoding."
+    author: "samedit66 <samedit66@yandex.ru>"
+    library: "os"
+
 class
     OS_FILE_PATH_ENCODING_READER
 

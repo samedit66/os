@@ -1,3 +1,12 @@
+note
+    description: "[
+        Internal owner of a native process handle, its pipe workers, captured
+        output, failures, and lifecycle state.
+    ]"
+    author: "samedit66 <samedit66@yandex.ru>"
+    library: "os"
+    warning: "Internal implementation class; client code should use `OS_COMMAND`."
+
 class
     OS_PROCESS
 

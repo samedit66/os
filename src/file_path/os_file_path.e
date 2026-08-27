@@ -19,6 +19,8 @@ note
         end
         ```
     ]"
+    author: "samedit66 <samedit66@yandex.ru>"
+    library: "os"
 
 frozen class
     OS_FILE_PATH

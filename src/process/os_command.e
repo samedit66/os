@@ -1,3 +1,16 @@
+note
+    description: "[
+        Reusable command configuration that launches and observes one native
+        process at a time, with optional input, output callbacks, and shell
+        execution.
+    ]"
+    author: "samedit66 <samedit66@yandex.ru>"
+    library: "os"
+    warning: "[
+        After `start` or `start_streaming`, call `wait_for_exit` or repeatedly
+        call `poll` until `finished`, including after `terminate`.
+    ]"
+
 class
     OS_COMMAND
 

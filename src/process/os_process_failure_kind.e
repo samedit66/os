@@ -1,3 +1,8 @@
+note
+    description: "Value object that identifies a portable process-failure category."
+    author: "samedit66 <samedit66@yandex.ru>"
+    library: "os"
+
 class
     OS_PROCESS_FAILURE_KIND
 

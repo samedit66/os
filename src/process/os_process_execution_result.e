@@ -1,3 +1,11 @@
+note
+    description: "[
+        Immutable snapshot of a completed process execution, including launch
+        status, optional exit code, captured output, and structured failures.
+    ]"
+    author: "samedit66 <samedit66@yandex.ru>"
+    library: "os"
+
 class
     OS_PROCESS_EXECUTION_RESULT
 

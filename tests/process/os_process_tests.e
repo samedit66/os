@@ -1,3 +1,8 @@
+note
+    description: "Test cases for process execution, lifecycle, I/O, and failures."
+    author: "samedit66 <samedit66@yandex.ru>"
+    library: "os"
+
 class
     OS_PROCESS_TESTS
 

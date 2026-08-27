@@ -1,3 +1,8 @@
+note
+    description: "Test cases for portable path and whole-file operations."
+    author: "samedit66 <samedit66@yandex.ru>"
+    library: "os"
+
 class
     OS_FILE_PATH_TESTS
 

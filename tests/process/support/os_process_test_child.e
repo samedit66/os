@@ -1,3 +1,8 @@
+note
+    description: "Helper executable that provides controlled child-process behaviors for tests."
+    author: "samedit66 <samedit66@yandex.ru>"
+    library: "os"
+
 class
     OS_PROCESS_TEST_CHILD
 

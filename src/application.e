@@ -1,3 +1,8 @@
+note
+    description: "Demonstrate streaming command execution with the os library."
+    author: "samedit66 <samedit66@yandex.ru>"
+    library: "os"
+
 class
     APPLICATION
 

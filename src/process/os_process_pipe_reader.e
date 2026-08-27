@@ -1,3 +1,11 @@
+note
+    description: "[
+        Internal worker that drains one native process output pipe, captures
+        its bytes, and optionally forwards chunks to a callback.
+    ]"
+    author: "samedit66 <samedit66@yandex.ru>"
+    library: "os"
+
 class
     OS_PROCESS_PIPE_READER
 

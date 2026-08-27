@@ -421,18 +421,19 @@ feature -- Test
 			-- Serialize concurrent wait and terminate calls on one command.
 		local
 			command: OS_COMMAND
-			waiter: OS_COMMAND_LIFECYCLE_CALLER
 			terminator: OS_COMMAND_LIFECYCLE_CALLER
+			terminator_launched: BOOLEAN
 		do
 			create command.make (process_child_executable, child_arguments ("short-sleep"))
 			command.start
-			create waiter.make_wait (command)
 			create terminator.make_terminate (command)
-			waiter.launch
 			terminator.launch
-			waiter.join
-			terminator.join
-			assert_true ("concurrent wait returned", waiter.successful)
+			terminator_launched := terminator.is_last_launch_successful
+			command.wait_for_exit
+			if terminator_launched then
+				terminator.join
+			end
+			assert_true ("concurrent terminate launched", terminator_launched)
 			assert_true ("concurrent terminate returned", terminator.successful)
 			assert_true ("concurrent lifecycle finished", command.finished)
 		end

@@ -60,6 +60,9 @@ feature {NONE} -- Child modes
             elseif mode.same_string_general ("sleep") then
                 create environment
                 environment.sleep (10_000_000_000)
+            elseif mode.same_string_general ("short-sleep") then
+                create environment
+                environment.sleep (100_000_000)
             else
                 exceptions.die (2)
             end

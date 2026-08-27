@@ -45,14 +45,18 @@ int os_process_wait(os_process *process, int *exit_code);
 int os_process_terminate(os_process *process);
 
 /*
+ * Force child termination during recovery from a partially initialized or
+ * otherwise unsafe lifecycle. This is not the public termination operation;
+ * the caller must still wait for the child and finish active pipe operations.
+ */
+int os_process_force_terminate(os_process *process);
+
+/*
  * Release the process and its pipe endpoints. This does not terminate or reap
  * a child. The child must already be reaped and no pipe operation may remain
  * active. Passing NULL is allowed.
  */
 void os_process_free(os_process *process);
-
-/* Return nonzero when error_code denotes an expected command launch failure. */
-int os_process_is_command_error(int error_code);
 
 #ifdef __cplusplus
 }

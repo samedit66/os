@@ -11,6 +11,7 @@
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <wchar.h>
 
 struct os_process {
@@ -142,6 +143,12 @@ static void close_handle(HANDLE *handle)
     }
 }
 
+static int executable_is_path_like(const char *executable)
+{
+    return strchr(executable, '/') != NULL || strchr(executable, '\\') != NULL ||
+        (executable[0] != '\0' && executable[1] == ':');
+}
+
 os_process *os_process_start(
     const char *executable,
     char *const arguments[],
@@ -158,6 +165,7 @@ os_process *os_process_start(
     SIZE_T attributes_size = 0;
     HANDLE inherited[3];
     wchar_t *command_line = NULL;
+    wchar_t *application_name = NULL;
     wchar_t *working_directory_wide = NULL;
     os_process *process = NULL;
     DWORD windows_error = ERROR_SUCCESS;
@@ -170,6 +178,10 @@ os_process *os_process_start(
     }
     command_line = build_command_line(arguments, error_code);
     if (command_line == NULL) goto fail;
+    if (executable_is_path_like(executable)) {
+        application_name = utf8_to_wide(executable, error_code);
+        if (application_name == NULL) goto fail;
+    }
     if (working_directory != NULL) {
         working_directory_wide = utf8_to_wide(working_directory, error_code);
         if (working_directory_wide == NULL) goto fail;
@@ -209,7 +221,7 @@ os_process *os_process_start(
 
     ZeroMemory(&information, sizeof(information));
     if (!CreateProcessW(
-        NULL, command_line, NULL, NULL, TRUE,
+        application_name, command_line, NULL, NULL, TRUE,
         EXTENDED_STARTUPINFO_PRESENT, NULL, working_directory_wide,
         &startup.StartupInfo, &information
     )) {
@@ -243,6 +255,7 @@ fail:
         free(startup.lpAttributeList);
     }
     free(command_line);
+    free(application_name);
     free(working_directory_wide);
     close_handle(&stdout_read);
     close_handle(&stdout_write);
@@ -356,6 +369,13 @@ int os_process_terminate(os_process *process)
     return TerminateProcess(process->process, 1) ? 0 : error_as_int(GetLastError());
 }
 
+int os_process_force_terminate(os_process *process)
+{
+    if (process == NULL) return ERROR_INVALID_PARAMETER;
+    if (process->has_exited) return 0;
+    return TerminateProcess(process->process, 1) ? 0 : error_as_int(GetLastError());
+}
+
 void os_process_free(os_process *process)
 {
     if (process != NULL) {
@@ -365,15 +385,6 @@ void os_process_free(os_process *process)
         close_handle(&process->process);
         free(process);
     }
-}
-
-int os_process_is_command_error(int error_code)
-{
-    return error_code == ERROR_FILE_NOT_FOUND ||
-        error_code == ERROR_PATH_NOT_FOUND ||
-        error_code == ERROR_DIRECTORY ||
-        error_code == ERROR_ACCESS_DENIED ||
-        error_code == ERROR_BAD_EXE_FORMAT;
 }
 
 #endif

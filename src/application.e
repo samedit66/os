@@ -10,20 +10,26 @@ feature {NONE} -- Initialization
             -- Run a small streaming example.
         local
             command: OS_COMMAND
-            process: OS_PROCESS
-            process_result: OS_PROCESS_RESULT
+            process_result: OS_PROCESS_EXECUTION_RESULT
         do
             create command.make ("git", << "--version" >>)
-            process := command.start_with_handlers (
+            command.start_streaming (
                 agent on_stdout,
                 agent on_stderr
             )
-            process.wait
-            process_result := process.outcome
+            command.wait_for_exit
+            process_result := command.execution_result
 
-            io.put_string ("Exit code: ")
-            io.put_integer (process_result.exit_code)
-            io.put_new_line
+            if process_result.has_exit_code then
+                io.put_string ("Exit code: ")
+                io.put_integer (process_result.exit_code)
+                io.put_new_line
+            else
+                across process_result.failures as failure loop
+                    io.error.put_string (failure.description)
+                    io.error.put_new_line
+                end
+            end
         end
 
 feature {NONE} -- Output

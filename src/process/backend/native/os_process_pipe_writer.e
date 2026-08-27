@@ -13,7 +13,31 @@ feature {NONE} -- Initialization
         do
             process := a_process
             create input.make_from_string (a_input)
+            create failure_mutex.make
             create worker.make (agent write_loop)
+        end
+
+feature {OS_PROCESS} -- Access
+
+    failures: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
+            -- Defensive snapshot of failures recorded by this writer.
+        local
+            snapshot: ARRAYED_LIST [OS_PROCESS_FAILURE]
+            write_snapshot: detachable OS_PROCESS_FAILURE
+            close_snapshot: detachable OS_PROCESS_FAILURE
+        do
+            failure_mutex.lock
+            write_snapshot := write_failure
+            close_snapshot := close_failure
+            failure_mutex.unlock
+            create snapshot.make (2)
+            if attached write_snapshot as failure then
+                snapshot.extend (failure)
+            end
+            if attached close_snapshot as failure then
+                snapshot.extend (failure)
+            end
+            Result := snapshot
         end
 
 feature {OS_PROCESS} -- Status report
@@ -24,46 +48,36 @@ feature {OS_PROCESS} -- Status report
             Result := worker.terminated
         end
 
+    is_last_launch_successful: BOOLEAN
+            -- Did the most recent worker launch succeed?
+        do
+            Result := worker.is_last_launch_successful
+        end
+
     has_failed: BOOLEAN
             -- Did a native write or close fail?
         do
-            Result := write_failed or close_failed
-        end
-
-    failure_description: detachable STRING_8
-            -- Description of the first failure, if any.
-        local
-            description: STRING_8
-        do
-            if write_failed then
-                create description.make_from_string ("Cannot write standard input")
-                if write_error_code > 0 then
-                    append_native_error (description, write_error_code)
-                end
-                Result := description
-            elseif close_failed then
-                create description.make_from_string ("Cannot close standard input")
-                append_native_error (description, close_error_code)
-                Result := description
-            end
-        ensure
-            failure_reported: has_failed = attached Result
+            failure_mutex.lock
+            Result := attached write_failure or attached close_failure
+            failure_mutex.unlock
         end
 
 feature {OS_PROCESS} -- Basic operations
 
     launch
-            -- Launch the Eiffel writer thread.
+            -- Attempt to launch the Eiffel writer thread.
         do
             worker.launch
-        ensure
-            launched: worker.is_last_launch_successful
         end
 
     join
-            -- Wait for the writer thread.
+            -- Wait for the launched writer thread.
+        require
+            launched: is_last_launch_successful
         do
             worker.join
+        ensure
+            finished: is_finished
         end
 
 feature {NONE} -- Writing
@@ -83,7 +97,7 @@ feature {NONE} -- Writing
                 from
                     input_index := 1
                 until
-                    input_index > input.count or write_failed
+                    input_index > input.count or write_has_failed
                 loop
                     count := buffer_capacity.min (input.count - input_index + 1)
                     from
@@ -91,7 +105,10 @@ feature {NONE} -- Writing
                     until
                         area_index = count
                     loop
-                        area.put_natural_8 (input.code (input_index + area_index).to_natural_8, area_index)
+                        area.put_natural_8 (
+                            input.code (input_index + area_index).to_natural_8,
+                            area_index
+                        )
                         area_index := area_index + 1
                     end
                     written := c_write_stdin (process, area.item, count)
@@ -100,14 +117,13 @@ feature {NONE} -- Writing
                     elseif written = 0 then
                         input_index := input.count + 1
                     else
-                        write_failed := True
-                        write_error_code := -written
+                        record_write_failure (-written)
                     end
                 end
                 close_pipe
             end
         rescue
-            write_failed := True
+            record_write_failure (0)
             close_pipe
             retried := True
             retry
@@ -122,20 +138,69 @@ feature {NONE} -- Writing
                 status := c_close_stdin (process)
                 is_closed := True
                 if status /= 0 then
-                    close_failed := True
-                    close_error_code := status
+                    record_close_failure (status)
                 end
             end
         end
 
-    append_native_error (a_message: STRING_8; a_code: INTEGER)
-            -- Append native error `a_code` to `a_message`.
+    record_write_failure (a_native_code: INTEGER)
+            -- Record the first write failure, with `a_native_code` when positive.
         require
-            positive_code: a_code > 0
+            nonnegative_native_code: a_native_code >= 0
+        local
+            failure_kind: OS_PROCESS_FAILURE_KIND
+            new_failure: OS_PROCESS_FAILURE
         do
-            a_message.append (" (native error ")
-            a_message.append_integer (a_code)
-            a_message.append_character (')')
+            create failure_kind.make_stdin_write
+            if a_native_code > 0 then
+                create new_failure.make_with_native_code (
+                    failure_kind,
+                    "write stdin",
+                    "Cannot write standard input",
+                    a_native_code
+                )
+            else
+                create new_failure.make (
+                    failure_kind,
+                    "write stdin",
+                    "Cannot write standard input"
+                )
+            end
+            failure_mutex.lock
+            if not attached write_failure then
+                write_failure := new_failure
+            end
+            failure_mutex.unlock
+        end
+
+    record_close_failure (a_native_code: INTEGER)
+            -- Record the first standard-input close failure.
+        require
+            positive_native_code: a_native_code > 0
+        local
+            failure_kind: OS_PROCESS_FAILURE_KIND
+            new_failure: OS_PROCESS_FAILURE
+        do
+            create failure_kind.make_stdin_close
+            create new_failure.make_with_native_code (
+                failure_kind,
+                "close stdin",
+                "Cannot close standard input",
+                a_native_code
+            )
+            failure_mutex.lock
+            if not attached close_failure then
+                close_failure := new_failure
+            end
+            failure_mutex.unlock
+        end
+
+    write_has_failed: BOOLEAN
+            -- Has writing failed?
+        do
+            failure_mutex.lock
+            Result := attached write_failure
+            failure_mutex.unlock
         end
 
 feature {NONE} -- Native bridge
@@ -154,13 +219,11 @@ feature {NONE} -- Implementation
 
     worker: WORKER_THREAD
 
-    write_failed: BOOLEAN
+    failure_mutex: MUTEX
 
-    close_failed: BOOLEAN
+    write_failure: detachable OS_PROCESS_FAILURE
 
-    write_error_code: INTEGER
-
-    close_error_code: INTEGER
+    close_failure: detachable OS_PROCESS_FAILURE
 
     is_closed: BOOLEAN
 

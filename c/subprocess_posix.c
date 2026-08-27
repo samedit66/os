@@ -154,7 +154,7 @@ os_process *os_process_start(
     process = (os_process *)calloc(1, sizeof(*process));
     if (process == NULL) {
         result = ENOMEM;
-        (void)kill(pid, SIGTERM);
+        (void)kill(pid, SIGKILL);
         while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {
         }
         goto fail;
@@ -207,11 +207,9 @@ static int write_fd_without_sigpipe(int fd, const void *buffer, int capacity)
 {
     sigset_t blocked;
     sigset_t old_mask;
-    sigset_t pending;
     struct sigaction pipe_action;
     ssize_t count;
     int mask_error;
-    int pipe_was_pending;
     int pipe_is_ignored;
     int saved_error;
     int ignored_signal;
@@ -224,12 +222,11 @@ static int write_fd_without_sigpipe(int fd, const void *buffer, int capacity)
     pipe_is_ignored = pipe_action.sa_handler == SIG_IGN;
     mask_error = pthread_sigmask(SIG_BLOCK, &blocked, &old_mask);
     if (mask_error != 0) return -mask_error;
-    pipe_was_pending = sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE) == 1;
     do {
         count = write(fd, buffer, (size_t)capacity);
     } while (count < 0 && errno == EINTR);
     saved_error = count < 0 ? errno : 0;
-    if (saved_error == EPIPE && !pipe_was_pending && !pipe_is_ignored) {
+    if (saved_error == EPIPE && !pipe_is_ignored) {
         (void)sigwait(&blocked, &ignored_signal);
     }
     mask_error = pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
@@ -307,6 +304,13 @@ int os_process_terminate(os_process *process)
     return kill(process->pid, SIGTERM) == 0 ? 0 : errno;
 }
 
+int os_process_force_terminate(os_process *process)
+{
+    if (process == NULL) return EINVAL;
+    if (process->has_exited) return 0;
+    return kill(process->pid, SIGKILL) == 0 ? 0 : errno;
+}
+
 void os_process_free(os_process *process)
 {
     if (process != NULL) {
@@ -315,12 +319,6 @@ void os_process_free(os_process *process)
         close_fd(&process->stderr_fd);
         free(process);
     }
-}
-
-int os_process_is_command_error(int error_code)
-{
-    return error_code == ENOENT || error_code == ENOTDIR ||
-        error_code == EACCES || error_code == ENOEXEC;
 }
 
 #endif

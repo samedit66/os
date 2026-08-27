@@ -19,13 +19,35 @@ feature {NONE} -- Initialization
             is_stdout := a_is_stdout
             handler := a_handler
             create output.make_empty
+            create failure_mutex.make
             create worker.make (agent read_loop)
         end
 
 feature {OS_PROCESS} -- Access
 
     output: STRING_8
-            -- Bytes captured by this reader.
+            -- Bytes captured by this reader after `join`.
+
+    failures: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
+            -- Defensive snapshot of failures recorded by this reader.
+        local
+            snapshot: ARRAYED_LIST [OS_PROCESS_FAILURE]
+            read_snapshot: detachable OS_PROCESS_FAILURE
+            handler_snapshot: detachable OS_PROCESS_FAILURE
+        do
+            failure_mutex.lock
+            read_snapshot := read_failure
+            handler_snapshot := handler_failure
+            failure_mutex.unlock
+            create snapshot.make (2)
+            if attached read_snapshot as failure then
+                snapshot.extend (failure)
+            end
+            if attached handler_snapshot as failure then
+                snapshot.extend (failure)
+            end
+            Result := snapshot
+        end
 
 feature {OS_PROCESS} -- Status report
 
@@ -35,48 +57,36 @@ feature {OS_PROCESS} -- Status report
             Result := worker.terminated
         end
 
+    is_last_launch_successful: BOOLEAN
+            -- Did the most recent worker launch succeed?
+        do
+            Result := worker.is_last_launch_successful
+        end
+
     has_failed: BOOLEAN
             -- Did a native read or user callback fail?
         do
-            Result := read_failed or callback_failed
-        end
-
-    failure_description: detachable STRING_8
-            -- Description of the first failure, if any.
-        local
-            description: STRING_8
-        do
-            if read_failed then
-                create description.make_from_string ("Cannot read standard ")
-                description.append (stream_name)
-                if native_error_code > 0 then
-                    append_native_error (description, native_error_code)
-                end
-                Result := description
-            elseif callback_failed then
-                create description.make_from_string ("Standard-")
-                description.append (stream_name)
-                description.append (" callback failed")
-                Result := description
-            end
-        ensure
-            failure_reported: has_failed = attached Result
+            failure_mutex.lock
+            Result := attached read_failure or attached handler_failure
+            failure_mutex.unlock
         end
 
 feature {OS_PROCESS} -- Basic operations
 
     launch
-            -- Launch the Eiffel reader thread.
+            -- Attempt to launch the Eiffel reader thread.
         do
             worker.launch
-        ensure
-            launched: worker.is_last_launch_successful
         end
 
     join
-            -- Wait for the reader thread.
+            -- Wait for the launched reader thread.
+        require
+            launched: is_last_launch_successful
         do
             worker.join
+        ensure
+            finished: is_finished
         end
 
 feature {NONE} -- Reading
@@ -95,7 +105,7 @@ feature {NONE} -- Reading
                 from
                     count := 1
                 until
-                    count = 0 or read_failed
+                    count = 0 or read_has_failed
                 loop
                     if is_stdout then
                         count := c_read_stdout (process, area.item, area.count)
@@ -108,49 +118,104 @@ feature {NONE} -- Reading
                         output.append (chunk)
                         call_handler (chunk)
                     elseif count < 0 then
-                        read_failed := True
-                        native_error_code := -count
+                        record_read_failure (-count)
                     end
                 end
             end
         rescue
-            read_failed := True
+            record_read_failure (0)
             retried := True
             retry
         end
 
     call_handler (a_chunk: READABLE_STRING_8)
-            -- Forward `a_chunk`, recording but containing callback failure.
+            -- Forward `a_chunk`, recording and containing callback failure.
         local
             retried: BOOLEAN
         do
-            if not retried and then not callback_failed and then attached handler as output_handler then
+            if not retried and then not handler_has_failed and then
+                attached handler as output_handler
+            then
                 output_handler.call ([a_chunk])
             end
         rescue
-            callback_failed := True
+            record_handler_failure
             retried := True
             retry
         end
 
-    stream_name: STRING_8
-            -- Name of the stream read by Current.
+    record_read_failure (a_native_code: INTEGER)
+            -- Record the first read failure, with `a_native_code` when positive.
+        require
+            nonnegative_native_code: a_native_code >= 0
+        local
+            failure_kind: OS_PROCESS_FAILURE_KIND
+            new_failure: OS_PROCESS_FAILURE
+            operation_name: STRING_8
+            message: STRING_8
         do
             if is_stdout then
-                Result := "output"
+                create failure_kind.make_stdout_read
+                operation_name := "read stdout"
+                message := "Cannot read standard output"
             else
-                Result := "error"
+                create failure_kind.make_stderr_read
+                operation_name := "read stderr"
+                message := "Cannot read standard error"
             end
+            if a_native_code > 0 then
+                create new_failure.make_with_native_code (
+                    failure_kind, operation_name, message, a_native_code
+                )
+            else
+                create new_failure.make (failure_kind, operation_name, message)
+            end
+            failure_mutex.lock
+            if not attached read_failure then
+                read_failure := new_failure
+            end
+            failure_mutex.unlock
         end
 
-    append_native_error (a_message: STRING_8; a_code: INTEGER)
-            -- Append native error `a_code` to `a_message`.
-        require
-            positive_code: a_code > 0
+    record_handler_failure
+            -- Record the first exception raised by this stream's handler.
+        local
+            failure_kind: OS_PROCESS_FAILURE_KIND
+            new_failure: OS_PROCESS_FAILURE
+            operation_name: STRING_8
+            message: STRING_8
         do
-            a_message.append (" (native error ")
-            a_message.append_integer (a_code)
-            a_message.append_character (')')
+            if is_stdout then
+                create failure_kind.make_stdout_handler
+                operation_name := "handle stdout"
+                message := "Standard-output handler failed"
+            else
+                create failure_kind.make_stderr_handler
+                operation_name := "handle stderr"
+                message := "Standard-error handler failed"
+            end
+            create new_failure.make (failure_kind, operation_name, message)
+            failure_mutex.lock
+            if not attached handler_failure then
+                handler_failure := new_failure
+            end
+            failure_mutex.unlock
+        end
+
+    read_has_failed: BOOLEAN
+            -- Has reading failed?
+        do
+            failure_mutex.lock
+            Result := attached read_failure
+            failure_mutex.unlock
+        end
+
+    handler_has_failed: BOOLEAN
+            -- Has the callback failed?
+        do
+            failure_mutex.lock
+            Result := attached handler_failure
+            failure_mutex.unlock
         end
 
 feature {NONE} -- Native bridge
@@ -171,11 +236,11 @@ feature {NONE} -- Implementation
 
     worker: WORKER_THREAD
 
-    read_failed: BOOLEAN
+    failure_mutex: MUTEX
 
-    callback_failed: BOOLEAN
+    read_failure: detachable OS_PROCESS_FAILURE
 
-    native_error_code: INTEGER
+    handler_failure: detachable OS_PROCESS_FAILURE
 
     buffer_capacity: INTEGER = 4096
 

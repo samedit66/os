@@ -299,6 +299,7 @@ feature {NONE} -- Implementation
             target_encoding: ENCODING
             converted_bytes: STRING_8
             converted_text: STRING_32
+            index: INTEGER
             conversion_failed: BOOLEAN
             mutex_locked: BOOLEAN
         do
@@ -310,6 +311,16 @@ feature {NONE} -- Implementation
                 else
                     conversion_failed := True
                     create converted_text.make_empty
+                end
+            elseif is_iso_8859_1_code_page (code_page) then
+                create converted_text.make (a_bytes.count)
+                from
+                    index := 1
+                until
+                    index > a_bytes.count
+                loop
+                    converted_text.append_code (a_bytes.code (index))
+                    index := index + 1
                 end
             else
                 create source_encoding.make (code_page)
@@ -359,6 +370,8 @@ feature {NONE} -- Implementation
             target_encoding: ENCODING
             utf_8_text: STRING_8
             converted_bytes: STRING_8
+            index: INTEGER
+            code: NATURAL_32
             conversion_failed: BOOLEAN
             mutex_locked: BOOLEAN
         do
@@ -366,6 +379,21 @@ feature {NONE} -- Implementation
             create code_page.make_from_string (a_encoding.code_page)
             if code_page.is_case_insensitive_equal ({CODE_PAGE_CONSTANTS}.utf8) then
                 converted_bytes := {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (a_text)
+            elseif is_iso_8859_1_code_page (code_page) then
+                create converted_bytes.make (a_text.count)
+                from
+                    index := 1
+                until
+                    index > a_text.count or else conversion_failed
+                loop
+                    code := a_text.code (index)
+                    if code <= 0xFF then
+                        converted_bytes.append_code (code)
+                    else
+                        conversion_failed := True
+                    end
+                    index := index + 1
+                end
             else
                 utf_8_text := {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (a_text)
                 create source_encoding.make ({CODE_PAGE_CONSTANTS}.utf8)
@@ -394,6 +422,14 @@ feature {NONE} -- Implementation
             if mutex_locked then
                 encoding_mutex.unlock
             end
+        end
+
+    is_iso_8859_1_code_page (a_code_page: READABLE_STRING_8): BOOLEAN
+            -- Does `a_code_page` denote ISO-8859-1?
+        do
+            Result :=
+                a_code_page.is_case_insensitive_equal ("ISO-8859-1") or else
+                a_code_page.same_string ("28591")
         end
 
     raise_conversion_failure (a_message: STRING_8)

@@ -180,6 +180,8 @@ feature -- Test
             invalid_utf_8_file: OS_FILE_PATH
             bom_file: OS_FILE_PATH
             latin_1: ENCODING
+            named_latin_1: ENCODING
+            numeric_latin_1: ENCODING
             latin_1_text: STRING_32
             unrepresentable_text: STRING_32
             invalid_utf_8: STRING_8
@@ -190,17 +192,26 @@ feature -- Test
             root.create_directory
             latin_1_file := root / "latin-1.txt"
             latin_1 := {SYSTEM_ENCODINGS}.iso_8859_1
-            assert_true (
-                "latin-1 encoding",
-                latin_1.code_page.is_case_insensitive_equal ("ISO-8859-1")
-            )
             create latin_1_text.make_from_string_general ("caf")
             latin_1_text.append_code (0xE9)
             latin_1_file.write_text_with_encoding (latin_1_text, latin_1)
+            create named_latin_1.make ("ISO-8859-1")
+            create numeric_latin_1.make ("28591")
             assert_text_equal (
                 "latin-1 text",
                 latin_1_text,
                 latin_1_file.text_with_encoding (latin_1)
+            )
+            assert_text_equal (
+                "named latin-1 text",
+                latin_1_text,
+                latin_1_file.text_with_encoding (named_latin_1)
+            )
+            latin_1_file.write_text_with_encoding (latin_1_text, numeric_latin_1)
+            assert_text_equal (
+                "numeric latin-1 text",
+                latin_1_text,
+                latin_1_file.text_with_encoding (numeric_latin_1)
             )
             assert_integers_equal (
                 "latin-1 byte count",

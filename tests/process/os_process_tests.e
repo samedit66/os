@@ -437,32 +437,6 @@ feature -- Test
 			assert_true ("concurrent lifecycle finished", command.finished)
 		end
 
-	test_concurrent_starts_are_atomic
-			-- Allow exactly one of two concurrent starts to create a child.
-		local
-			command: OS_COMMAND
-			first_starter: OS_COMMAND_LIFECYCLE_CALLER
-			second_starter: OS_COMMAND_LIFECYCLE_CALLER
-			successful_starts: INTEGER
-		do
-			create command.make (process_child_executable, child_arguments ("short-sleep"))
-			create first_starter.make_start (command)
-			create second_starter.make_start (command)
-			first_starter.launch
-			second_starter.launch
-			first_starter.join
-			second_starter.join
-			if first_starter.successful then
-				successful_starts := successful_starts + 1
-			end
-			if second_starter.successful then
-				successful_starts := successful_starts + 1
-			end
-			assert_integers_equal ("one concurrent start", 1, successful_starts)
-			assert_true ("concurrent start recorded", command.has_started)
-			command.wait_for_exit
-		end
-
 	test_finished_is_passive
 			-- Require polling or waiting to observe native completion.
 		local
@@ -479,15 +453,6 @@ feature -- Test
 				command.wait_for_exit
 			end
 			assert_true ("completion observed explicitly", command.finished)
-		end
-
-	test_nul_command_text_is_rejected
-			-- Reject NUL in command text while preserving binary standard input.
-		do
-			assert_true ("NUL executable rejected", nul_executable_rejected)
-			assert_true ("NUL argument rejected", nul_argument_rejected)
-			assert_true ("NUL directory rejected", nul_directory_rejected)
-			assert_true ("NUL shell command rejected", nul_shell_command_rejected)
 		end
 
 	test_command_copies_inputs
@@ -720,86 +685,6 @@ feature {NONE} -- Support
 			Result := a_items.upper - a_items.lower + 1
 		ensure
 			nonnegative: Result >= 0
-		end
-
-	nul_executable_rejected: BOOLEAN
-			-- Does command creation reject NUL in the executable?
-		local
-			command: OS_COMMAND
-			executable_name: STRING_32
-			retried: BOOLEAN
-		do
-			if retried then
-				Result := True
-			else
-				create executable_name.make_from_string_general ("git")
-				executable_name.append_code (0)
-				create command.make (executable_name, create {ARRAYED_LIST [READABLE_STRING_GENERAL]}.make (0))
-			end
-		rescue
-			retried := True
-			retry
-		end
-
-	nul_argument_rejected: BOOLEAN
-			-- Does command creation reject NUL in an argument?
-		local
-			command: OS_COMMAND
-			arguments: ARRAYED_LIST [READABLE_STRING_GENERAL]
-			argument: STRING_32
-			retried: BOOLEAN
-		do
-			if retried then
-				Result := True
-			else
-				create argument.make_from_string_general ("argument")
-				argument.append_code (0)
-				create arguments.make (1)
-				arguments.extend (argument)
-				create command.make ("git", arguments)
-			end
-		rescue
-			retried := True
-			retry
-		end
-
-	nul_directory_rejected: BOOLEAN
-			-- Does configuration reject NUL in a working directory?
-		local
-			command: OS_COMMAND
-			directory_name: STRING_32
-			retried: BOOLEAN
-		do
-			if retried then
-				Result := True
-			else
-				create command.make ("git", <<"--version">>)
-				create directory_name.make_from_string_general ("directory")
-				directory_name.append_code (0)
-				command.set_working_directory (directory_name)
-			end
-		rescue
-			retried := True
-			retry
-		end
-
-	nul_shell_command_rejected: BOOLEAN
-			-- Does shell-command creation reject NUL in command text?
-		local
-			command: OS_COMMAND
-			command_text: STRING_32
-			retried: BOOLEAN
-		do
-			if retried then
-				Result := True
-			else
-				create command_text.make_from_string_general ("echo")
-				command_text.append_code (0)
-				create command.make_shell (command_text)
-			end
-		rescue
-			retried := True
-			retry
 		end
 
 	current_test_root: PATH

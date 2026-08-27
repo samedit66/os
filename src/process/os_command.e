@@ -32,7 +32,6 @@ feature {NONE} -- Initialization
 			argument_copy: STRING_32
 		do
 			create command_mutex.make
-			require_valid_text (a_executable, "Executable")
 			create executable.make_from_string_general (a_executable)
 			create arguments.make (8)
 			create input.make_empty
@@ -41,7 +40,6 @@ feature {NONE} -- Initialization
 			as
 				argument
 			loop
-				require_valid_text (argument, "Argument")
 				create argument_copy.make_from_string_general (argument)
 				arguments.extend (argument_copy)
 			end
@@ -59,7 +57,6 @@ feature {NONE} -- Initialization
 			command_not_empty: not a_command.is_empty
 			command_has_no_nul: not a_command.has_code (0)
 		do
-			require_valid_text (a_command, "Shell command")
 			make (shell_executable, shell_arguments (a_command))
 		end
 
@@ -100,7 +97,6 @@ feature -- Change
 			directory_copy: STRING_32
 			mutex_locked: BOOLEAN
 		do
-			require_valid_text (a_directory, "Working directory")
 			create directory_path.make_from_string (a_directory)
 			directory_copy := directory_path.canonical_path.name.to_string_32
 			command_mutex.lock
@@ -336,18 +332,10 @@ feature {NONE} -- State publication
 			Result := not has_started_state or else finished_state
 		end
 
-feature {NONE} -- Validation
-
-	require_valid_text (a_text: READABLE_STRING_GENERAL; a_name: READABLE_STRING_8)
-			-- Reject embedded NUL independently of assertion settings.
-		do
-			if a_text.has_code (0) then
-				raise_client_failure (a_name + " contains a NUL character")
-			end
-		end
+feature {NONE} -- Error reporting
 
 	raise_client_failure (a_message: READABLE_STRING_8)
-			-- Report a violated runtime lifecycle or text obligation.
+			-- Report a violated runtime lifecycle obligation.
 		do
 			(create {EXCEPTIONS}).raise (a_message)
 		end

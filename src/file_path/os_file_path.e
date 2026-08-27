@@ -131,7 +131,7 @@ feature -- Content access
 			file.open_read
 			from
 			until
-				file.end_of_file
+				not file.file_readable
 			loop
 				file.read_stream (read_buffer_size)
 				buffer.append (file.last_string)

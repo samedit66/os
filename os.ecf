@@ -5,6 +5,9 @@
     library_target="os">
     <target name="os">
         <root all_classes="true"/>
+        <option>
+            <assertions precondition="true" supplier_precondition="true"/>
+        </option>
         <capability>
             <concurrency support="thread"/>
             <void_safety support="all" use="all"/>

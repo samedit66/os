@@ -60,9 +60,6 @@ feature {OS_PROCESS} -- Status report
 
 	is_last_launch_successful: BOOLEAN
 			-- Did the most recent worker launch succeed?
-		do
-			Result := worker.is_last_launch_successful
-		end
 
 	has_failed: BOOLEAN
 			-- Did a native write or close fail?
@@ -78,6 +75,7 @@ feature {OS_PROCESS} -- Basic operations
 			-- Attempt to launch the Eiffel writer thread.
 		do
 			worker.launch
+			is_last_launch_successful := worker.is_last_launch_successful
 		end
 
 	join

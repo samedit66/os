@@ -233,21 +233,17 @@ compiler with an archiver. Code-quality targets additionally require
 make gobo       # build and run the example with Gobo Eiffel
 make ise        # build and run the example with EiffelStudio
 make test       # run the shared test suite with both compilers
+make test-ise-finalized  # run the EiffelStudio suite as a finalized build
 make check      # run gelint and the EiffelStudio Code Analyzer
-make format     # format Eiffel with Gobo gedoc
-make format-gobo  # explicitly use Gobo gedoc
-make format-ise   # optionally use EiffelStudio pretty-printing
 make ccheck     # analyze the handwritten C bridge with clang-tidy
 make cformat    # format the handwritten C bridge with clang-format
 ```
 
-`make format-ise` is available when EiffelStudio layout is preferred to the
-default Gobo layout. The default formatter excludes two files affected by
-`gedoc` 26.06 defects involving raw UTF-8 literals and grouped `unique`
-constants; the ISE formatter can process them. Source lists, ECF targets,
-compiler flags, individual test targets, and tool paths can be overridden
-through variables defined in the [`Makefile`](Makefile). CI runs the shared
-suite on Ubuntu, macOS, and Windows.
+Eiffel formatting is intentionally not automated because the available Gobo
+and EiffelStudio formatters can corrupt valid source code. Source lists, ECF
+targets, compiler flags, individual test targets, and tool paths can be
+overridden through variables defined in the [`Makefile`](Makefile). CI runs the
+shared suite on Ubuntu, macOS, and Windows.
 
 ## Scope
 

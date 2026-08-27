@@ -5,6 +5,9 @@
     library_target="os_file_path">
     <target name="os_file_path">
         <root all_classes="true"/>
+        <option>
+            <assertions precondition="true" supplier_precondition="true"/>
+        </option>
         <capability>
             <void_safety support="all" use="all"/>
         </capability>

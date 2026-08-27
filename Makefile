@@ -1,10 +1,13 @@
 GOBO ?= $(HOME)/Projects/gobo
 GEC ?= $(GOBO)/bin/gec
 GELINT ?= $(GOBO)/bin/gelint
+GEDOC ?= $(GOBO)/bin/gedoc
 GETEST ?= $(GOBO)/bin/getest
 EC ?= ec
 CC ?= cc
 AR ?= ar
+CLANG_FORMAT ?= clang-format
+CLANG_TIDY ?= clang-tidy
 
 CFLAGS ?= -O2
 CPPFLAGS ?=
@@ -14,11 +17,21 @@ NATIVE_OBJECT = $(NATIVE_DIR)/subprocess.o
 NATIVE_LIBRARY = $(NATIVE_DIR)/libos_process.a
 PROJECT_ROOT := $(abspath .)
 GOBO_FLAGS = --variable=GOBO_EIFFEL=ge --ise=25.12 --gelint
+EIFFEL_SOURCES ?= $(shell find src tests -type f -name '*.e')
+EIFFEL_GEDOC_EXCLUDES ?= src/process/os_process_failure_kind.e \
+	tests/file_path/os_file_path_tests.e
+EIFFEL_GEDOC_SOURCES ?= $(filter-out $(EIFFEL_GEDOC_EXCLUDES),$(EIFFEL_SOURCES))
+EIFFEL_TARGETS ?= file_path.ecf@os_file_path process.ecf@os_process os.ecf@application
+C_FORMAT_SOURCES ?= $(wildcard c/*.c c/*.h)
+C_CHECK_SOURCES ?= c/subprocess_posix.c
+C_CHECK_FLAGS ?= -std=c11 -I c
+CLANG_TIDY_CHECKS ?= -*,clang-analyzer-*,bugprone-*,cert-*,portability-*,-bugprone-reserved-identifier,-cert-dcl37-c,-cert-dcl51-cpp
 
-.PHONY: all native gobo ise test generate-tests generate-file-path-tests \
+.PHONY: all native check check-gobo check-ise format format-gobo format-ise \
+	ccheck cformat gobo ise test generate-tests generate-file-path-tests \
 	generate-process-tests generate-os-tests test-gobo test-ise \
 	test-file-path-gobo test-process-gobo test-os-gobo \
-	test-file-path-ise test-process-ise test-os-ise lint-gobo clean
+	test-file-path-ise test-process-ise test-os-ise clean
 
 all: gobo
 
@@ -33,10 +46,47 @@ $(NATIVE_LIBRARY): $(NATIVE_OBJECT)
 
 native: $(NATIVE_LIBRARY)
 
-lint-gobo:
-	GOBO_EIFFEL=ge $(GELINT) --variable=GOBO_EIFFEL=ge --ise=25.12 --target=os_file_path file_path.ecf
-	GOBO_EIFFEL=ge $(GELINT) --variable=GOBO_EIFFEL=ge --ise=25.12 --target=os_process process.ecf
-	GOBO_EIFFEL=ge $(GELINT) --variable=GOBO_EIFFEL=ge --ise=25.12 --target=application os.ecf
+check: check-gobo check-ise
+
+check-gobo:
+	@set -e; for system in $(EIFFEL_TARGETS); do \
+		ecf=$${system%@*}; target=$${system#*@}; \
+		GOBO_EIFFEL=ge $(GELINT) --variable=GOBO_EIFFEL=ge --ise=25.12 \
+			--target="$$target" "$$ecf"; \
+	done
+
+check-ise:
+	@set -e; for system in $(EIFFEL_TARGETS); do \
+		ecf=$${system%@*}; target=$${system#*@}; \
+		GOBO="$(GOBO)" GOBO_EIFFEL=ise $(EC) -batch -config "$$ecf" \
+			-target "$$target" -ca_default -ca_class -all; \
+	done
+
+format: format-gobo
+
+format-gobo:
+	@set -e; for file in $(EIFFEL_GEDOC_SOURCES); do \
+		case "$$file" in */*) output_dir=$${file%/*} ;; *) output_dir=. ;; esac; \
+		$(GEDOC) --force --no-benchmark --output="$$output_dir" "$$file"; \
+	done
+
+# Use this optional target for ISE layout and files excluded because of gedoc defects.
+format-ise:
+	@set -e; for file in $(EIFFEL_SOURCES); do \
+		output=$$(mktemp "$$file.pretty.XXXXXX"); \
+		if $(EC) -pretty "$$file" "$$output"; then \
+			cp "$$output" "$$file"; rm -f "$$output"; \
+		else \
+			rm -f "$$output"; exit 1; \
+		fi; \
+	done
+
+ccheck:
+	$(CLANG_TIDY) $(C_CHECK_SOURCES) -checks='$(CLANG_TIDY_CHECKS)' \
+		-warnings-as-errors='*' -- $(C_CHECK_FLAGS)
+
+cformat:
+	$(CLANG_FORMAT) -i $(C_FORMAT_SOURCES)
 
 gobo: native
 	GOBO_EIFFEL=ge ZIG_GLOBAL_CACHE_DIR=$(PROJECT_ROOT)/build/zig-global-cache ZIG_LOCAL_CACHE_DIR=$(PROJECT_ROOT)/build/zig-local-cache $(GEC) $(GOBO_FLAGS) --target=application os.ecf

@@ -14,7 +14,8 @@
 #include <string.h>
 #include <wchar.h>
 
-struct os_process {
+struct os_process
+{
     HANDLE process;
     HANDLE stdin_write;
     HANDLE stdout_read;
@@ -23,31 +24,32 @@ struct os_process {
     int has_exited;
 };
 
-typedef struct wide_buffer {
+typedef struct wide_buffer
+{
     wchar_t *data;
     size_t count;
     size_t capacity;
 } wide_buffer;
 
-static int error_as_int(DWORD error)
-{
-    return error > INT_MAX ? INT_MAX : (int)error;
-}
+static int error_as_int(DWORD error) { return error > INT_MAX ? INT_MAX : (int)error; }
 
 static wchar_t *utf8_to_wide(const char *text, int *error_code)
 {
     int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, NULL, 0);
     wchar_t *result;
-    if (count == 0) {
+    if (count == 0)
+    {
         *error_code = error_as_int(GetLastError());
         return NULL;
     }
     result = (wchar_t *)calloc((size_t)count, sizeof(wchar_t));
-    if (result == NULL) {
+    if (result == NULL)
+    {
         *error_code = ERROR_NOT_ENOUGH_MEMORY;
         return NULL;
     }
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, result, count) == 0) {
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, result, count) == 0)
+    {
         *error_code = error_as_int(GetLastError());
         free(result);
         return NULL;
@@ -59,10 +61,12 @@ static int append_wide(wide_buffer *buffer, wchar_t value)
 {
     size_t capacity;
     wchar_t *data;
-    if (buffer->count + 2 > buffer->capacity) {
+    if (buffer->count + 2 > buffer->capacity)
+    {
         capacity = buffer->capacity == 0 ? 64 : buffer->capacity * 2;
         data = (wchar_t *)realloc(buffer->data, capacity * sizeof(wchar_t));
-        if (data == NULL) return 0;
+        if (data == NULL)
+            return 0;
         buffer->data = data;
         buffer->capacity = capacity;
     }
@@ -73,8 +77,10 @@ static int append_wide(wide_buffer *buffer, wchar_t value)
 
 static int append_backslashes(wide_buffer *buffer, size_t count)
 {
-    while (count-- > 0) {
-        if (!append_wide(buffer, L'\\')) return 0;
+    while (count-- > 0)
+    {
+        if (!append_wide(buffer, L'\\'))
+            return 0;
     }
     return 1;
 }
@@ -84,28 +90,40 @@ static int append_argument(wide_buffer *buffer, const wchar_t *argument)
     const wchar_t *cursor;
     size_t backslashes;
     int quoted = argument[0] == L'\0' || wcspbrk(argument, L" \t\n\v\"") != NULL;
-    if (!quoted) {
-        for (cursor = argument; *cursor != L'\0'; ++cursor) {
-            if (!append_wide(buffer, *cursor)) return 0;
+    if (!quoted)
+    {
+        for (cursor = argument; *cursor != L'\0'; ++cursor)
+        {
+            if (!append_wide(buffer, *cursor))
+                return 0;
         }
         return 1;
     }
-    if (!append_wide(buffer, L'\"')) return 0;
+    if (!append_wide(buffer, L'\"'))
+        return 0;
     cursor = argument;
-    while (*cursor != L'\0') {
+    while (*cursor != L'\0')
+    {
         backslashes = 0;
-        while (*cursor == L'\\') {
+        while (*cursor == L'\\')
+        {
             ++backslashes;
             ++cursor;
         }
-        if (*cursor == L'\"') {
-            if (!append_backslashes(buffer, backslashes * 2 + 1) ||
-                !append_wide(buffer, *cursor++)) return 0;
-        } else if (*cursor == L'\0') {
-            if (!append_backslashes(buffer, backslashes * 2)) return 0;
-        } else {
-            if (!append_backslashes(buffer, backslashes) ||
-                !append_wide(buffer, *cursor++)) return 0;
+        if (*cursor == L'\"')
+        {
+            if (!append_backslashes(buffer, backslashes * 2 + 1) || !append_wide(buffer, *cursor++))
+                return 0;
+        }
+        else if (*cursor == L'\0')
+        {
+            if (!append_backslashes(buffer, backslashes * 2))
+                return 0;
+        }
+        else
+        {
+            if (!append_backslashes(buffer, backslashes) || !append_wide(buffer, *cursor++))
+                return 0;
         }
     }
     return append_wide(buffer, L'\"');
@@ -116,14 +134,16 @@ static wchar_t *build_command_line(char *const arguments[], int *error_code)
     wide_buffer buffer = {0};
     wchar_t *argument;
     size_t index;
-    for (index = 0; arguments[index] != NULL; ++index) {
+    for (index = 0; arguments[index] != NULL; ++index)
+    {
         argument = utf8_to_wide(arguments[index], error_code);
-        if (argument == NULL) {
+        if (argument == NULL)
+        {
             free(buffer.data);
             return NULL;
         }
-        if ((index > 0 && !append_wide(&buffer, L' ')) ||
-            !append_argument(&buffer, argument)) {
+        if ((index > 0 && !append_wide(&buffer, L' ')) || !append_argument(&buffer, argument))
+        {
             free(argument);
             free(buffer.data);
             *error_code = ERROR_NOT_ENOUGH_MEMORY;
@@ -131,13 +151,15 @@ static wchar_t *build_command_line(char *const arguments[], int *error_code)
         }
         free(argument);
     }
-    if (buffer.data == NULL) *error_code = ERROR_INVALID_PARAMETER;
+    if (buffer.data == NULL)
+        *error_code = ERROR_INVALID_PARAMETER;
     return buffer.data;
 }
 
 static void close_handle(HANDLE *handle)
 {
-    if (*handle != NULL && *handle != INVALID_HANDLE_VALUE) {
+    if (*handle != NULL && *handle != INVALID_HANDLE_VALUE)
+    {
         (void)CloseHandle(*handle);
         *handle = NULL;
     }
@@ -146,15 +168,11 @@ static void close_handle(HANDLE *handle)
 static int executable_is_path_like(const char *executable)
 {
     return strchr(executable, '/') != NULL || strchr(executable, '\\') != NULL ||
-        (executable[0] != '\0' && executable[1] == ':');
+           (executable[0] != '\0' && executable[1] == ':');
 }
 
-os_process *os_process_start(
-    const char *executable,
-    char *const arguments[],
-    const char *working_directory,
-    int *error_code
-)
+os_process *os_process_start(const char *executable, char *const arguments[],
+                             const char *working_directory, int *error_code)
 {
     SECURITY_ATTRIBUTES security = {sizeof(security), NULL, TRUE};
     HANDLE stdout_read = NULL, stdout_write = NULL;
@@ -170,28 +188,36 @@ os_process *os_process_start(
     os_process *process = NULL;
     DWORD windows_error = ERROR_SUCCESS;
 
-    if (error_code == NULL) return NULL;
+    if (error_code == NULL)
+        return NULL;
     *error_code = 0;
-    if (executable == NULL || arguments == NULL) {
+    if (executable == NULL || arguments == NULL)
+    {
         *error_code = ERROR_INVALID_PARAMETER;
         return NULL;
     }
     command_line = build_command_line(arguments, error_code);
-    if (command_line == NULL) goto fail;
-    if (executable_is_path_like(executable)) {
+    if (command_line == NULL)
+        goto fail;
+    if (executable_is_path_like(executable))
+    {
         application_name = utf8_to_wide(executable, error_code);
-        if (application_name == NULL) goto fail;
+        if (application_name == NULL)
+            goto fail;
     }
-    if (working_directory != NULL) {
+    if (working_directory != NULL)
+    {
         working_directory_wide = utf8_to_wide(working_directory, error_code);
-        if (working_directory_wide == NULL) goto fail;
+        if (working_directory_wide == NULL)
+            goto fail;
     }
     if (!CreatePipe(&stdin_read, &stdin_write, &security, 0) ||
         !SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0) ||
         !CreatePipe(&stdout_read, &stdout_write, &security, 0) ||
         !SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0) ||
         !CreatePipe(&stderr_read, &stderr_write, &security, 0) ||
-        !SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0)) {
+        !SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0))
+    {
         windows_error = GetLastError();
         goto fail;
     }
@@ -206,25 +232,24 @@ os_process *os_process_start(
     inherited[2] = stderr_write;
     (void)InitializeProcThreadAttributeList(NULL, 1, 0, &attributes_size);
     startup.lpAttributeList = (PPROC_THREAD_ATTRIBUTE_LIST)malloc(attributes_size);
-    if (startup.lpAttributeList == NULL) {
+    if (startup.lpAttributeList == NULL)
+    {
         windows_error = ERROR_NOT_ENOUGH_MEMORY;
         goto fail;
     }
     if (!InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &attributes_size) ||
-        !UpdateProcThreadAttribute(
-            startup.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-            inherited, sizeof(inherited), NULL, NULL
-        )) {
+        !UpdateProcThreadAttribute(startup.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                   inherited, sizeof(inherited), NULL, NULL))
+    {
         windows_error = GetLastError();
         goto fail;
     }
 
     ZeroMemory(&information, sizeof(information));
-    if (!CreateProcessW(
-        application_name, command_line, NULL, NULL, TRUE,
-        EXTENDED_STARTUPINFO_PRESENT, NULL, working_directory_wide,
-        &startup.StartupInfo, &information
-    )) {
+    if (!CreateProcessW(application_name, command_line, NULL, NULL, TRUE,
+                        EXTENDED_STARTUPINFO_PRESENT, NULL, working_directory_wide,
+                        &startup.StartupInfo, &information))
+    {
         windows_error = GetLastError();
         goto fail;
     }
@@ -233,7 +258,8 @@ os_process *os_process_start(
     close_handle(&stderr_write);
     close_handle(&stdin_read);
     process = (os_process *)calloc(1, sizeof(*process));
-    if (process == NULL) {
+    if (process == NULL)
+    {
         (void)TerminateProcess(information.hProcess, 1);
         (void)WaitForSingleObject(information.hProcess, INFINITE);
         (void)CloseHandle(information.hProcess);
@@ -250,7 +276,8 @@ os_process *os_process_start(
     stderr_read = NULL;
 
 fail:
-    if (startup.lpAttributeList != NULL) {
+    if (startup.lpAttributeList != NULL)
+    {
         DeleteProcThreadAttributeList(startup.lpAttributeList);
         free(startup.lpAttributeList);
     }
@@ -263,7 +290,8 @@ fail:
     close_handle(&stderr_write);
     close_handle(&stdin_read);
     close_handle(&stdin_write);
-    if (process == NULL && windows_error != ERROR_SUCCESS) {
+    if (process == NULL && windows_error != ERROR_SUCCESS)
+    {
         *error_code = error_as_int(windows_error);
     }
     return process;
@@ -273,8 +301,10 @@ static int read_handle(HANDLE handle, void *buffer, int capacity)
 {
     DWORD count = 0;
     DWORD error;
-    if (buffer == NULL || capacity <= 0) return -ERROR_INVALID_PARAMETER;
-    if (!ReadFile(handle, buffer, (DWORD)capacity, &count, NULL)) {
+    if (buffer == NULL || capacity <= 0)
+        return -ERROR_INVALID_PARAMETER;
+    if (!ReadFile(handle, buffer, (DWORD)capacity, &count, NULL))
+    {
         error = GetLastError();
         return error == ERROR_BROKEN_PIPE ? 0 : -error_as_int(error);
     }
@@ -283,28 +313,30 @@ static int read_handle(HANDLE handle, void *buffer, int capacity)
 
 int os_process_read_stdout(os_process *process, void *buffer, int capacity)
 {
-    return process == NULL ? -ERROR_INVALID_PARAMETER :
-        read_handle(process->stdout_read, buffer, capacity);
+    return process == NULL ? -ERROR_INVALID_PARAMETER
+                           : read_handle(process->stdout_read, buffer, capacity);
 }
 
 int os_process_read_stderr(os_process *process, void *buffer, int capacity)
 {
-    return process == NULL ? -ERROR_INVALID_PARAMETER :
-        read_handle(process->stderr_read, buffer, capacity);
+    return process == NULL ? -ERROR_INVALID_PARAMETER
+                           : read_handle(process->stderr_read, buffer, capacity);
 }
 
 int os_process_write_stdin(os_process *process, const void *buffer, int capacity)
 {
     DWORD count = 0;
     DWORD error;
-    if (process == NULL || buffer == NULL || capacity <= 0) {
+    if (process == NULL || buffer == NULL || capacity <= 0)
+    {
         return -ERROR_INVALID_PARAMETER;
     }
-    if (process->stdin_write == NULL) return 0;
-    if (!WriteFile(process->stdin_write, buffer, (DWORD)capacity, &count, NULL)) {
+    if (process->stdin_write == NULL)
+        return 0;
+    if (!WriteFile(process->stdin_write, buffer, (DWORD)capacity, &count, NULL))
+    {
         error = GetLastError();
-        return error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA ?
-            0 : -error_as_int(error);
+        return error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA ? 0 : -error_as_int(error);
     }
     return (int)count;
 }
@@ -312,8 +344,10 @@ int os_process_write_stdin(os_process *process, const void *buffer, int capacity
 int os_process_close_stdin(os_process *process)
 {
     HANDLE handle;
-    if (process == NULL) return ERROR_INVALID_PARAMETER;
-    if (process->stdin_write == NULL) return 0;
+    if (process == NULL)
+        return ERROR_INVALID_PARAMETER;
+    if (process->stdin_write == NULL)
+        return 0;
     handle = process->stdin_write;
     process->stdin_write = NULL;
     return CloseHandle(handle) ? 0 : error_as_int(GetLastError());
@@ -322,7 +356,8 @@ int os_process_close_stdin(os_process *process)
 static int store_exit_code(os_process *process, int *exit_code)
 {
     DWORD native_code;
-    if (!GetExitCodeProcess(process->process, &native_code)) return error_as_int(GetLastError());
+    if (!GetExitCodeProcess(process->process, &native_code))
+        return error_as_int(GetLastError());
     process->exit_code = (int)native_code;
     process->has_exited = 1;
     *exit_code = process->exit_code;
@@ -332,31 +367,38 @@ static int store_exit_code(os_process *process, int *exit_code)
 int os_process_poll(os_process *process, int *finished, int *exit_code)
 {
     DWORD result;
-    if (process == NULL || finished == NULL || exit_code == NULL) return ERROR_INVALID_PARAMETER;
-    if (process->has_exited) {
+    if (process == NULL || finished == NULL || exit_code == NULL)
+        return ERROR_INVALID_PARAMETER;
+    if (process->has_exited)
+    {
         *finished = 1;
         *exit_code = process->exit_code;
         return 0;
     }
     result = WaitForSingleObject(process->process, 0);
-    if (result == WAIT_TIMEOUT) {
+    if (result == WAIT_TIMEOUT)
+    {
         *finished = 0;
         *exit_code = -1;
         return 0;
     }
-    if (result != WAIT_OBJECT_0) return error_as_int(GetLastError());
+    if (result != WAIT_OBJECT_0)
+        return error_as_int(GetLastError());
     *finished = 1;
     return store_exit_code(process, exit_code);
 }
 
 int os_process_wait(os_process *process, int *exit_code)
 {
-    if (process == NULL || exit_code == NULL) return ERROR_INVALID_PARAMETER;
-    if (process->has_exited) {
+    if (process == NULL || exit_code == NULL)
+        return ERROR_INVALID_PARAMETER;
+    if (process->has_exited)
+    {
         *exit_code = process->exit_code;
         return 0;
     }
-    if (WaitForSingleObject(process->process, INFINITE) != WAIT_OBJECT_0) {
+    if (WaitForSingleObject(process->process, INFINITE) != WAIT_OBJECT_0)
+    {
         return error_as_int(GetLastError());
     }
     return store_exit_code(process, exit_code);
@@ -364,21 +406,26 @@ int os_process_wait(os_process *process, int *exit_code)
 
 int os_process_terminate(os_process *process)
 {
-    if (process == NULL) return ERROR_INVALID_PARAMETER;
-    if (process->has_exited) return 0;
+    if (process == NULL)
+        return ERROR_INVALID_PARAMETER;
+    if (process->has_exited)
+        return 0;
     return TerminateProcess(process->process, 1) ? 0 : error_as_int(GetLastError());
 }
 
 int os_process_force_terminate(os_process *process)
 {
-    if (process == NULL) return ERROR_INVALID_PARAMETER;
-    if (process->has_exited) return 0;
+    if (process == NULL)
+        return ERROR_INVALID_PARAMETER;
+    if (process->has_exited)
+        return 0;
     return TerminateProcess(process->process, 1) ? 0 : error_as_int(GetLastError());
 }
 
 void os_process_free(os_process *process)
 {
-    if (process != NULL) {
+    if (process != NULL)
+    {
         close_handle(&process->stdin_write);
         close_handle(&process->stdout_read);
         close_handle(&process->stderr_read);

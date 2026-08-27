@@ -26,7 +26,8 @@
 
 extern char **environ;
 
-struct os_process {
+struct os_process
+{
     pid_t pid;
     int stdin_fd;
     int stdout_fd;
@@ -37,7 +38,8 @@ struct os_process {
 
 static void close_fd(int *fd)
 {
-    if (*fd >= 0) {
+    if (*fd >= 0)
+    {
         (void)close(*fd);
         *fd = -1;
     }
@@ -46,7 +48,8 @@ static void close_fd(int *fd)
 static int set_close_on_exec(int fd)
 {
     int flags = fcntl(fd, F_GETFD);
-    if (flags < 0 || fcntl(fd, F_SETFD, flags | FD_CLOEXEC) < 0) {
+    if (flags < 0 || fcntl(fd, F_SETFD, flags | FD_CLOEXEC) < 0)
+    {
         return errno;
     }
     return 0;
@@ -56,10 +59,8 @@ static int set_close_on_exec(int fd)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
-static int add_working_directory_action(
-    posix_spawn_file_actions_t *actions,
-    const char *working_directory
-)
+static int add_working_directory_action(posix_spawn_file_actions_t *actions,
+                                        const char *working_directory)
 {
     return posix_spawn_file_actions_addchdir_np(actions, working_directory);
 }
@@ -69,21 +70,19 @@ static int add_working_directory_action(
 
 static int decoded_exit_code(int status)
 {
-    if (WIFEXITED(status)) {
+    if (WIFEXITED(status))
+    {
         return WEXITSTATUS(status);
     }
-    if (WIFSIGNALED(status)) {
+    if (WIFSIGNALED(status))
+    {
         return -WTERMSIG(status);
     }
     return -1;
 }
 
-os_process *os_process_start(
-    const char *executable,
-    char *const arguments[],
-    const char *working_directory,
-    int *error_code
-)
+os_process *os_process_start(const char *executable, char *const arguments[],
+                             const char *working_directory, int *error_code)
 {
     int stdin_pipe[2] = {-1, -1};
     int stdout_pipe[2] = {-1, -1};
@@ -94,41 +93,59 @@ os_process *os_process_start(
     pid_t pid;
     os_process *process = NULL;
 
-    if (error_code != NULL) {
+    if (error_code != NULL)
+    {
         *error_code = 0;
     }
-    if (executable == NULL || arguments == NULL || error_code == NULL) {
+    if (executable == NULL || arguments == NULL || error_code == NULL)
+    {
         return NULL;
     }
-    if (pipe(stdin_pipe) != 0) {
+    if (pipe(stdin_pipe) != 0)
+    {
         result = errno;
         goto fail;
     }
-    if (pipe(stdout_pipe) != 0) {
+    if (pipe(stdout_pipe) != 0)
+    {
         result = errno;
         goto fail;
     }
-    if (pipe(stderr_pipe) != 0) {
+    if (pipe(stderr_pipe) != 0)
+    {
         result = errno;
         goto fail;
     }
     result = set_close_on_exec(stdin_pipe[0]);
-    if (result != 0) goto fail;
+    if (result != 0)
+        goto fail;
     result = set_close_on_exec(stdin_pipe[1]);
-    if (result != 0) goto fail;
+    if (result != 0)
+        goto fail;
     result = set_close_on_exec(stdout_pipe[0]);
-    if (result != 0) goto fail;
+    if (result != 0)
+        goto fail;
     result = set_close_on_exec(stdout_pipe[1]);
-    if (result != 0) goto fail;
+    if (result != 0)
+        goto fail;
     result = set_close_on_exec(stderr_pipe[0]);
-    if (result != 0) goto fail;
+    if (result != 0)
+        goto fail;
     result = set_close_on_exec(stderr_pipe[1]);
-    if (result != 0) goto fail;
+    if (result != 0)
+        goto fail;
 
     result = posix_spawn_file_actions_init(&actions);
-    if (result != 0) goto fail;
+    if (result != 0)
+        goto fail;
     actions_initialized = 1;
-#define ADD_ACTION(call) do { result = (call); if (result != 0) goto fail; } while (0)
+#define ADD_ACTION(call)                                                                           \
+    do                                                                                             \
+    {                                                                                              \
+        result = (call);                                                                           \
+        if (result != 0)                                                                           \
+            goto fail;                                                                             \
+    } while (0)
     ADD_ACTION(posix_spawn_file_actions_adddup2(&actions, stdin_pipe[0], STDIN_FILENO));
     ADD_ACTION(posix_spawn_file_actions_adddup2(&actions, stdout_pipe[1], STDOUT_FILENO));
     ADD_ACTION(posix_spawn_file_actions_adddup2(&actions, stderr_pipe[1], STDERR_FILENO));
@@ -138,13 +155,15 @@ os_process *os_process_start(
     ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdin_pipe[0]));
     ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdout_pipe[1]));
     ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stderr_pipe[1]));
-    if (working_directory != NULL) {
+    if (working_directory != NULL)
+    {
         ADD_ACTION(add_working_directory_action(&actions, working_directory));
     }
 #undef ADD_ACTION
 
     result = posix_spawnp(&pid, executable, &actions, NULL, arguments, environ);
-    if (result != 0) goto fail;
+    if (result != 0)
+        goto fail;
     (void)posix_spawn_file_actions_destroy(&actions);
     actions_initialized = 0;
     close_fd(&stdin_pipe[0]);
@@ -152,10 +171,12 @@ os_process *os_process_start(
     close_fd(&stderr_pipe[1]);
 
     process = (os_process *)calloc(1, sizeof(*process));
-    if (process == NULL) {
+    if (process == NULL)
+    {
         result = ENOMEM;
         (void)kill(pid, SIGKILL);
-        while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {
+        while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
+        {
         }
         goto fail;
     }
@@ -170,7 +191,8 @@ os_process *os_process_start(
     return process;
 
 fail:
-    if (actions_initialized) {
+    if (actions_initialized)
+    {
         (void)posix_spawn_file_actions_destroy(&actions);
     }
     close_fd(&stdin_pipe[0]);
@@ -186,8 +208,10 @@ fail:
 static int read_fd(int fd, void *buffer, int capacity)
 {
     ssize_t count;
-    if (buffer == NULL || capacity <= 0) return -EINVAL;
-    do {
+    if (buffer == NULL || capacity <= 0)
+        return -EINVAL;
+    do
+    {
         count = read(fd, buffer, (size_t)capacity);
     } while (count < 0 && errno == EINTR);
     return count < 0 ? -errno : (int)count;
@@ -214,39 +238,51 @@ static int write_fd_without_sigpipe(int fd, const void *buffer, int capacity)
     int saved_error;
     int ignored_signal;
 
-    if (buffer == NULL || capacity <= 0) return -EINVAL;
-    if (sigemptyset(&blocked) != 0 || sigaddset(&blocked, SIGPIPE) != 0) {
+    if (buffer == NULL || capacity <= 0)
+        return -EINVAL;
+    if (sigemptyset(&blocked) != 0 || sigaddset(&blocked, SIGPIPE) != 0)
+    {
         return -errno;
     }
-    if (sigaction(SIGPIPE, NULL, &pipe_action) != 0) return -errno;
+    if (sigaction(SIGPIPE, NULL, &pipe_action) != 0)
+        return -errno;
     pipe_is_ignored = pipe_action.sa_handler == SIG_IGN;
     mask_error = pthread_sigmask(SIG_BLOCK, &blocked, &old_mask);
-    if (mask_error != 0) return -mask_error;
-    do {
+    if (mask_error != 0)
+        return -mask_error;
+    do
+    {
         count = write(fd, buffer, (size_t)capacity);
     } while (count < 0 && errno == EINTR);
     saved_error = count < 0 ? errno : 0;
-    if (saved_error == EPIPE && !pipe_is_ignored) {
+    if (saved_error == EPIPE && !pipe_is_ignored)
+    {
         (void)sigwait(&blocked, &ignored_signal);
     }
     mask_error = pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
-    if (mask_error != 0) return -mask_error;
-    if (saved_error == EPIPE) return 0;
+    if (mask_error != 0)
+        return -mask_error;
+    if (saved_error == EPIPE)
+        return 0;
     return count < 0 ? -saved_error : (int)count;
 }
 
 int os_process_write_stdin(os_process *process, const void *buffer, int capacity)
 {
-    if (process == NULL) return -EINVAL;
-    if (process->stdin_fd < 0) return 0;
+    if (process == NULL)
+        return -EINVAL;
+    if (process->stdin_fd < 0)
+        return 0;
     return write_fd_without_sigpipe(process->stdin_fd, buffer, capacity);
 }
 
 int os_process_close_stdin(os_process *process)
 {
     int fd;
-    if (process == NULL) return EINVAL;
-    if (process->stdin_fd < 0) return 0;
+    if (process == NULL)
+        return EINVAL;
+    if (process->stdin_fd < 0)
+        return 0;
     fd = process->stdin_fd;
     process->stdin_fd = -1;
     return close(fd) == 0 ? 0 : errno;
@@ -256,17 +292,22 @@ int os_process_poll(os_process *process, int *finished, int *exit_code)
 {
     int status;
     pid_t result;
-    if (process == NULL || finished == NULL || exit_code == NULL) return EINVAL;
-    if (process->has_exited) {
+    if (process == NULL || finished == NULL || exit_code == NULL)
+        return EINVAL;
+    if (process->has_exited)
+    {
         *finished = 1;
         *exit_code = process->exit_code;
         return 0;
     }
-    do {
+    do
+    {
         result = waitpid(process->pid, &status, WNOHANG);
     } while (result < 0 && errno == EINTR);
-    if (result < 0) return errno;
-    if (result == 0) {
+    if (result < 0)
+        return errno;
+    if (result == 0)
+    {
         *finished = 0;
         *exit_code = -1;
         return 0;
@@ -282,15 +323,19 @@ int os_process_wait(os_process *process, int *exit_code)
 {
     int status;
     pid_t result;
-    if (process == NULL || exit_code == NULL) return EINVAL;
-    if (process->has_exited) {
+    if (process == NULL || exit_code == NULL)
+        return EINVAL;
+    if (process->has_exited)
+    {
         *exit_code = process->exit_code;
         return 0;
     }
-    do {
+    do
+    {
         result = waitpid(process->pid, &status, 0);
     } while (result < 0 && errno == EINTR);
-    if (result < 0) return errno;
+    if (result < 0)
+        return errno;
     process->exit_code = decoded_exit_code(status);
     process->has_exited = 1;
     *exit_code = process->exit_code;
@@ -299,21 +344,26 @@ int os_process_wait(os_process *process, int *exit_code)
 
 int os_process_terminate(os_process *process)
 {
-    if (process == NULL) return EINVAL;
-    if (process->has_exited) return 0;
+    if (process == NULL)
+        return EINVAL;
+    if (process->has_exited)
+        return 0;
     return kill(process->pid, SIGTERM) == 0 ? 0 : errno;
 }
 
 int os_process_force_terminate(os_process *process)
 {
-    if (process == NULL) return EINVAL;
-    if (process->has_exited) return 0;
+    if (process == NULL)
+        return EINVAL;
+    if (process->has_exited)
+        return 0;
     return kill(process->pid, SIGKILL) == 0 ? 0 : errno;
 }
 
 void os_process_free(os_process *process)
 {
-    if (process != NULL) {
+    if (process != NULL)
+    {
         close_fd(&process->stdin_fd);
         close_fd(&process->stdout_fd);
         close_fd(&process->stderr_fd);

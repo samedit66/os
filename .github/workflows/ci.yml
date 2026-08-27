@@ -41,6 +41,16 @@ jobs:
       - name: Compile POSIX bridge
         if: runner.os != 'Windows'
         run: make native CC=${{ matrix.compiler }}
+      - name: Install Clang tools
+        if: runner.os == 'Linux' && matrix.compiler == 'clang'
+        run: sudo apt-get update && sudo apt-get install --yes clang-format clang-tidy
+      - name: Check and format C bridge
+        if: runner.os == 'Linux' && matrix.compiler == 'clang'
+        run: |
+          make ccheck
+          make cformat
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
       - name: Compile Windows bridge
         if: runner.os == 'Windows'
         shell: cmd
@@ -70,6 +80,12 @@ jobs:
       - name: Build and test
         if: runner.os != 'Windows'
         run: make test-gobo
+      - name: Check Gobo formatting
+        if: runner.os == 'Linux'
+        run: |
+          make format
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
       - name: Compile file path tests
         if: runner.os == 'Windows'
         shell: cmd
@@ -155,6 +171,9 @@ jobs:
         run: .github/scripts/install-eiffelstudio.ps1
       - name: Report EiffelStudio version
         run: ec -version
+      - name: Analyze Eiffel code
+        if: runner.os == 'Linux'
+        run: make check
       - name: Compile and test
         if: runner.os != 'Windows'
         run: make test-ise

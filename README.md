@@ -226,16 +226,28 @@ details.
 ## Development
 
 Building requires Gobo Eiffel 26.06, EiffelStudio 25.12 or later, and a C11
-compiler with an archiver. On Linux and macOS:
+compiler with an archiver. Code-quality targets additionally require
+`clang-format` and `clang-tidy`. On Linux and macOS:
 
 ```console
 make gobo       # build and run the example with Gobo Eiffel
 make ise        # build and run the example with EiffelStudio
 make test       # run the shared test suite with both compilers
+make check      # run gelint and the EiffelStudio Code Analyzer
+make format     # format Eiffel with Gobo gedoc
+make format-gobo  # explicitly use Gobo gedoc
+make format-ise   # optionally use EiffelStudio pretty-printing
+make ccheck     # analyze the handwritten C bridge with clang-tidy
+make cformat    # format the handwritten C bridge with clang-format
 ```
 
-Individual test targets and tool overrides are defined in the
-[`Makefile`](Makefile). CI runs the shared suite on Ubuntu, macOS, and Windows.
+`make format-ise` is available when EiffelStudio layout is preferred to the
+default Gobo layout. The default formatter excludes two files affected by
+`gedoc` 26.06 defects involving raw UTF-8 literals and grouped `unique`
+constants; the ISE formatter can process them. Source lists, ECF targets,
+compiler flags, individual test targets, and tool paths can be overridden
+through variables defined in the [`Makefile`](Makefile). CI runs the shared
+suite on Ubuntu, macOS, and Windows.
 
 ## Scope
 

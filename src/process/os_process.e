@@ -1,720 +1,683 @@
 note
-    description: "[
+
+	description:
+	"[
         Internal owner of a native process handle, its pipe workers, captured
         output, failures, and lifecycle state.
     ]"
-    author: "samedit66 <samedit66@yandex.ru>"
-    library: "os"
-    warning: "Internal implementation class; client code should use `OS_COMMAND`."
+	author: "samedit66 <samedit66@yandex.ru>"
+	library: "os"
+	warning: "Internal implementation class; client code should use `OS_COMMAND`."
 
-class
-    OS_PROCESS
+class OS_PROCESS
 
 create {OS_COMMAND}
-    make
+
+	make
 
 feature {NONE} -- Initialization
 
-    make (
-        a_executable: READABLE_STRING_GENERAL;
-        a_arguments: ITERABLE [READABLE_STRING_GENERAL];
-        a_stdout: detachable PROCEDURE [READABLE_STRING_8];
-        a_stderr: detachable PROCEDURE [READABLE_STRING_8];
-        a_working_directory: detachable READABLE_STRING_GENERAL;
-        a_input: READABLE_STRING_8
-    )
-            -- Launch the native process and its Eiffel pipe workers.
-        do
-            create lifecycle_mutex.make
-            create state_mutex.make
-            create failure_storage.make (4)
-            create stdout_snapshot.make_empty
-            create stderr_snapshot.make_empty
-            launch_process (
-                a_executable,
-                a_arguments,
-                a_stdout,
-                a_stderr,
-                a_working_directory,
-                a_input
-            )
-        ensure
-            launch_failure_is_terminal:
-                not was_launched implies is_finished
-        end
+	make (a_executable: READABLE_STRING_GENERAL; a_arguments: ITERABLE [READABLE_STRING_GENERAL]; a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_working_directory: detachable READABLE_STRING_GENERAL; a_input: READABLE_STRING_8)
+			-- Launch the native process and its Eiffel pipe workers.
+		do
+			create lifecycle_mutex.make
+			create state_mutex.make
+			create failure_storage.make (4)
+			create stdout_snapshot.make_empty
+			create stderr_snapshot.make_empty
+			launch_process (a_executable, a_arguments, a_stdout, a_stderr, a_working_directory, a_input)
+		ensure
+			launch_failure_is_terminal: not was_launched implies is_finished
+		end
 
-    launch_process (
-        a_executable: READABLE_STRING_GENERAL;
-        a_arguments: ITERABLE [READABLE_STRING_GENERAL];
-        a_stdout: detachable PROCEDURE [READABLE_STRING_8];
-        a_stderr: detachable PROCEDURE [READABLE_STRING_8];
-        a_working_directory: detachable READABLE_STRING_GENERAL;
-        a_input: READABLE_STRING_8
-    )
-            -- Launch after all recovery state has been initialized.
-        local
-            executable_c: C_STRING
-            argument_strings: ARRAYED_LIST [C_STRING]
-            argument_vector: MANAGED_POINTER
-            error_area: MANAGED_POINTER
-            working_directory_c: detachable C_STRING
-            out_reader: OS_PROCESS_PIPE_READER
-            err_reader: OS_PROCESS_PIPE_READER
-            in_writer: OS_PROCESS_PIPE_WRITER
-            working_directory_pointer: POINTER
-            offset: INTEGER
-            launch_error: INTEGER
-        do
-            create executable_c.make (utf_8 (a_executable))
-            create argument_strings.make (8)
-            argument_strings.extend (executable_c)
-            across a_arguments as argument loop
-                argument_strings.extend (create {C_STRING}.make (utf_8 (argument)))
-            end
-
-            create argument_vector.make ((argument_strings.count + 1) * {PLATFORM}.pointer_bytes)
-            across argument_strings as argument loop
-                argument_vector.put_pointer (argument.item, offset)
-                offset := offset + {PLATFORM}.pointer_bytes
-            end
-            argument_vector.put_pointer (default_pointer, offset)
-
-            if attached a_working_directory as directory then
-                create working_directory_c.make (utf_8 (directory))
-                working_directory_pointer := working_directory_c.item
-            end
-            create error_area.make ({PLATFORM}.integer_32_bytes)
-            native_handle := c_start (
-                executable_c.item,
-                argument_vector.item,
-                working_directory_pointer,
-                error_area.item
-            )
-            if native_handle = default_pointer then
-                launch_error := error_area.read_integer_32 (0)
-                record_native_failure (
-                    new_launch_kind,
-                    "launch",
-                    "Cannot start process",
-                    launch_error
-                )
-                process_exited := True
-                complete
-            else
-                was_launched := True
-                create out_reader.make (native_handle, True, a_stdout)
-                create err_reader.make (native_handle, False, a_stderr)
-                create in_writer.make (native_handle, a_input)
-                stdout_reader := out_reader
-                stderr_reader := err_reader
-                stdin_writer := in_writer
-
-                out_reader.launch
-                if out_reader.is_last_launch_successful then
-                    stdout_reader_launched := True
-                else
-                    record_worker_initialization_failure ("initialize stdout worker")
-                end
-                if not has_worker_initialization_failure then
-                    err_reader.launch
-                    if err_reader.is_last_launch_successful then
-                        stderr_reader_launched := True
-                    else
-                        record_worker_initialization_failure ("initialize stderr worker")
-                    end
-                end
-                if not has_worker_initialization_failure then
-                    in_writer.launch
-                    if in_writer.is_last_launch_successful then
-                        stdin_writer_launched := True
-                    else
-                        record_worker_initialization_failure ("initialize stdin worker")
-                    end
-                end
-                if has_worker_initialization_failure then
-                    rollback_initialization
-                end
-            end
-        rescue
-            if was_launched and then not is_finished then
-                rollback_initialization
-            end
-        end
+	launch_process (a_executable: READABLE_STRING_GENERAL; a_arguments: ITERABLE [READABLE_STRING_GENERAL]; a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_working_directory: detachable READABLE_STRING_GENERAL; a_input: READABLE_STRING_8)
+			-- Launch after all recovery state has been initialized.
+		local
+			executable_c: C_STRING
+			argument_strings: ARRAYED_LIST [C_STRING]
+			argument_vector: MANAGED_POINTER
+			error_area: MANAGED_POINTER
+			working_directory_c: detachable C_STRING
+			out_reader: OS_PROCESS_PIPE_READER
+			err_reader: OS_PROCESS_PIPE_READER
+			in_writer: OS_PROCESS_PIPE_WRITER
+			working_directory_pointer: POINTER
+			offset: INTEGER
+			launch_error: INTEGER
+		do
+			create executable_c.make (utf_8 (a_executable))
+			create argument_strings.make (8)
+			argument_strings.extend (executable_c)
+			across
+				a_arguments
+			as
+				argument
+			loop
+				argument_strings.extend (create {C_STRING}.make (utf_8 (argument)))
+			end
+			create argument_vector.make ((argument_strings.count + 1) * {PLATFORM}.pointer_bytes)
+			across
+				argument_strings
+			as
+				argument
+			loop
+				argument_vector.put_pointer (argument.item, offset)
+				offset := offset + {PLATFORM}.pointer_bytes
+			end
+			argument_vector.put_pointer (default_pointer, offset)
+			if attached a_working_directory as directory then
+				create working_directory_c.make (utf_8 (directory))
+				working_directory_pointer := working_directory_c.item
+			end
+			create error_area.make ({PLATFORM}.integer_32_bytes)
+			native_handle := c_start (executable_c.item, argument_vector.item, working_directory_pointer, error_area.item)
+			if native_handle = default_pointer then
+				launch_error := error_area.read_integer_32 (0)
+				record_native_failure (new_launch_kind, "launch", "Cannot start process", launch_error)
+				process_exited := True
+				complete
+			else
+				was_launched := True
+				create out_reader.make (native_handle, True, a_stdout)
+				create err_reader.make (native_handle, False, a_stderr)
+				create in_writer.make (native_handle, a_input)
+				stdout_reader := out_reader
+				stderr_reader := err_reader
+				stdin_writer := in_writer
+				out_reader.launch
+				if out_reader.is_last_launch_successful then
+					stdout_reader_launched := True
+				else
+					record_worker_initialization_failure ("initialize stdout worker")
+				end
+				if not has_worker_initialization_failure then
+					err_reader.launch
+					if err_reader.is_last_launch_successful then
+						stderr_reader_launched := True
+					else
+						record_worker_initialization_failure ("initialize stderr worker")
+					end
+				end
+				if not has_worker_initialization_failure then
+					in_writer.launch
+					if in_writer.is_last_launch_successful then
+						stdin_writer_launched := True
+					else
+						record_worker_initialization_failure ("initialize stdin worker")
+					end
+				end
+				if has_worker_initialization_failure then
+					rollback_initialization
+				end
+			end
+		rescue
+			if was_launched and then not is_finished then
+				rollback_initialization
+			end
+		end
 
 feature {OS_COMMAND} -- Access
 
-    execution_result: OS_PROCESS_EXECUTION_RESULT
-            -- Completed execution result.
-        require
-            finished: is_finished
-        local
-            snapshot: detachable OS_PROCESS_EXECUTION_RESULT
-        do
-            state_mutex.lock
-            snapshot := process_execution_result
-            state_mutex.unlock
-            check attached snapshot as completed_result then
-                Result := completed_result
-            end
-        end
+	execution_result: OS_PROCESS_EXECUTION_RESULT
+			-- Completed execution result.
+		require
+			finished: is_finished
+		local
+			snapshot: detachable OS_PROCESS_EXECUTION_RESULT
+		do
+			state_mutex.lock
+			snapshot := process_execution_result
+			state_mutex.unlock
+			check
+				attached snapshot as completed_result
+			then
+				Result := completed_result
+			end
+		end
 
-    failures: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
-            -- Failures recorded so far in deterministic order.
-        do
-            Result := failure_snapshot
-        end
+	failures: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
+			-- Failures recorded so far in deterministic order.
+		do
+			Result := failure_snapshot
+		end
 
 feature {OS_COMMAND} -- Status report
 
-    is_finished: BOOLEAN
-            -- Is the terminal execution result available?
-        do
-            state_mutex.lock
-            Result := finished
-            state_mutex.unlock
-        end
+	is_finished: BOOLEAN
+			-- Is the terminal execution result available?
+		do
+			state_mutex.lock
+			Result := finished
+			state_mutex.unlock
+		end
 
-    has_failures: BOOLEAN
-            -- Have any process-library failures been recorded?
-        local
-            snapshot: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
-        do
-            snapshot := failures
-            Result := snapshot.lower <= snapshot.upper
-        end
+	has_failures: BOOLEAN
+			-- Have any process-library failures been recorded?
+		local
+			snapshot: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
+		do
+			snapshot := failures
+			Result := snapshot.lower <= snapshot.upper
+		end
 
 feature {OS_COMMAND} -- Basic operations
 
-    poll
-            -- Check for completion without waiting.
-        local
-            mutex_locked: BOOLEAN
-        do
-            lifecycle_mutex.lock
-            mutex_locked := True
-            if not is_finished then
-                poll_process
-                if process_exited and then io_finished then
-                    join_workers
-                    complete
-                end
-            end
-            lifecycle_mutex.unlock
-            mutex_locked := False
-        ensure
-            finished_is_stable: old is_finished implies is_finished
-        rescue
-            if mutex_locked then
-                lifecycle_mutex.unlock
-            end
-        end
+	poll
+			-- Check for completion without waiting.
+		local
+			mutex_locked: BOOLEAN
+		do
+			lifecycle_mutex.lock
+			mutex_locked := True
+			if not is_finished then
+				poll_process
+				if process_exited and then io_finished then
+					join_workers
+					complete
+				end
+			end
+			lifecycle_mutex.unlock
+			mutex_locked := False
+		ensure
+			finished_is_stable: old is_finished implies is_finished
+		rescue
+			if mutex_locked then
+				lifecycle_mutex.unlock
+			end
+		end
 
-    wait
-            -- Wait for child completion, I/O workers, and result publication.
-        local
-            mutex_locked: BOOLEAN
-        do
-            lifecycle_mutex.lock
-            mutex_locked := True
-            if not is_finished then
-                wait_for_process
-                join_workers
-                complete
-            end
-            lifecycle_mutex.unlock
-            mutex_locked := False
-        ensure
-            finished: is_finished
-        rescue
-            if mutex_locked then
-                lifecycle_mutex.unlock
-            end
-        end
+	wait
+			-- Wait for child completion, I/O workers, and result publication.
+		local
+			mutex_locked: BOOLEAN
+		do
+			lifecycle_mutex.lock
+			mutex_locked := True
+			if not is_finished then
+				wait_for_process
+				join_workers
+				complete
+			end
+			lifecycle_mutex.unlock
+			mutex_locked := False
+		ensure
+			finished: is_finished
+		rescue
+			if mutex_locked then
+				lifecycle_mutex.unlock
+			end
+		end
 
-    terminate
-            -- Request platform-dependent child termination.
-        local
-            status: INTEGER
-            mutex_locked: BOOLEAN
-        do
-            lifecycle_mutex.lock
-            mutex_locked := True
-            if not is_finished then
-                poll_process
-                if process_exited then
-                    if io_finished then
-                        join_workers
-                        complete
-                    end
-                elseif native_handle /= default_pointer then
-                    status := c_terminate (native_handle)
-                    if status /= 0 then
-                        record_native_failure (
-                            new_termination_kind,
-                            "terminate",
-                            "Cannot terminate process",
-                            status
-                        )
-                    end
-                end
-            end
-            lifecycle_mutex.unlock
-            mutex_locked := False
-        rescue
-            if mutex_locked then
-                lifecycle_mutex.unlock
-            end
-        end
+	terminate
+			-- Request platform-dependent child termination.
+		local
+			status: INTEGER
+			mutex_locked: BOOLEAN
+		do
+			lifecycle_mutex.lock
+			mutex_locked := True
+			if not is_finished then
+				poll_process
+				if process_exited then
+					if io_finished then
+						join_workers
+						complete
+					end
+				elseif native_handle /= default_pointer then
+					status := c_terminate (native_handle)
+					if status /= 0 then
+						record_native_failure (new_termination_kind, "terminate", "Cannot terminate process", status)
+					end
+				end
+			end
+			lifecycle_mutex.unlock
+			mutex_locked := False
+		rescue
+			if mutex_locked then
+				lifecycle_mutex.unlock
+			end
+		end
 
 feature {NONE} -- Completion
 
-    rollback_initialization
-            -- Restore safe ownership after an I/O worker failed to start.
-        local
-            exit_area: MANAGED_POINTER
-            status: INTEGER
-        do
-            if was_launched and then native_handle /= default_pointer then
-                if not stdin_writer_launched then
-                    status := c_close_stdin (native_handle)
-                    if status /= 0 then
-                        record_native_failure (
-                            new_stdin_close_kind,
-                            "close stdin during initialization rollback",
-                            "Cannot close standard input during initialization rollback",
-                            status
-                        )
-                    end
-                end
-                status := c_force_terminate (native_handle)
-                if status /= 0 then
-                    record_native_failure (
-                        new_termination_kind,
-                        "force terminate during initialization rollback",
-                        "Cannot force process termination during initialization rollback",
-                        status
-                    )
-                end
-                create exit_area.make ({PLATFORM}.integer_32_bytes)
-                status := c_wait (native_handle, exit_area.item)
-                if status = 0 then
-                    exit_status := exit_area.read_integer_32 (0)
-                    process_exited := True
-                    join_workers
-                    complete
-                else
-                    record_native_failure (
-                        new_wait_kind,
-                        "wait during initialization rollback",
-                        "Cannot wait for process during initialization rollback",
-                        status
-                    )
-                    raise_unsafe_lifecycle_failure (
-                        "Cannot restore process ownership after worker initialization failure",
-                        status
-                    )
-                end
-            end
-        end
+	rollback_initialization
+			-- Restore safe ownership after an I/O worker failed to start.
+		local
+			exit_area: MANAGED_POINTER
+			status: INTEGER
+		do
+			if was_launched and then native_handle /= default_pointer then
+				if not stdin_writer_launched then
+					status := c_close_stdin (native_handle)
+					if status /= 0 then
+						record_native_failure (new_stdin_close_kind, "close stdin during initialization rollback", "Cannot close standard input during initialization rollback", status)
+					end
+				end
+				status := c_force_terminate (native_handle)
+				if status /= 0 then
+					record_native_failure (new_termination_kind, "force terminate during initialization rollback", "Cannot force process termination during initialization rollback", status)
+				end
+				create exit_area.make ({PLATFORM}.integer_32_bytes)
+				status := c_wait (native_handle, exit_area.item)
+				if status = 0 then
+					exit_status := exit_area.read_integer_32 (0)
+					process_exited := True
+					join_workers
+					complete
+				else
+					record_native_failure (new_wait_kind, "wait during initialization rollback", "Cannot wait for process during initialization rollback", status)
+					raise_unsafe_lifecycle_failure ("Cannot restore process ownership after worker initialization failure", status)
+				end
+			end
+		end
 
-    poll_process
-            -- Poll the child and retain its status when it has exited.
-        local
-            finished_area: MANAGED_POINTER
-            exit_area: MANAGED_POINTER
-            status: INTEGER
-        do
-            if not process_exited and then native_handle /= default_pointer then
-                create finished_area.make ({PLATFORM}.integer_32_bytes)
-                create exit_area.make ({PLATFORM}.integer_32_bytes)
-                status := c_poll (native_handle, finished_area.item, exit_area.item)
-                if status /= 0 then
-                    record_native_failure (
-                        new_poll_kind,
-                        "poll",
-                        "Cannot poll process",
-                        status
-                    )
-                elseif finished_area.read_integer_32 (0) /= 0 then
-                    exit_status := exit_area.read_integer_32 (0)
-                    process_exited := True
-                end
-            end
-        end
+	poll_process
+			-- Poll the child and retain its status when it has exited.
+		local
+			finished_area: MANAGED_POINTER
+			exit_area: MANAGED_POINTER
+			status: INTEGER
+		do
+			if not process_exited and then native_handle /= default_pointer then
+				create finished_area.make ({PLATFORM}.integer_32_bytes)
+				create exit_area.make ({PLATFORM}.integer_32_bytes)
+				status := c_poll (native_handle, finished_area.item, exit_area.item)
+				if status /= 0 then
+					record_native_failure (new_poll_kind, "poll", "Cannot poll process", status)
+				elseif finished_area.read_integer_32 (0) /= 0 then
+					exit_status := exit_area.read_integer_32 (0)
+					process_exited := True
+				end
+			end
+		end
 
-    wait_for_process
-            -- Wait for the child, recovering ownership after a native wait failure.
-        local
-            exit_area: MANAGED_POINTER
-            status: INTEGER
-        do
-            if not process_exited then
-                create exit_area.make ({PLATFORM}.integer_32_bytes)
-                status := c_wait (native_handle, exit_area.item)
-                if status /= 0 then
-                    record_native_failure (
-                        new_wait_kind,
-                        "wait",
-                        "Cannot wait for process",
-                        status
-                    )
-                    recover_after_wait_failure (exit_area)
-                else
-                    exit_status := exit_area.read_integer_32 (0)
-                    process_exited := True
-                end
-            end
-        ensure
-            process_exited: process_exited
-        end
+	wait_for_process
+			-- Wait for the child, recovering ownership after a native wait failure.
+		local
+			exit_area: MANAGED_POINTER
+			status: INTEGER
+		do
+			if not process_exited then
+				create exit_area.make ({PLATFORM}.integer_32_bytes)
+				status := c_wait (native_handle, exit_area.item)
+				if status /= 0 then
+					record_native_failure (new_wait_kind, "wait", "Cannot wait for process", status)
+					recover_after_wait_failure (exit_area)
+				else
+					exit_status := exit_area.read_integer_32 (0)
+					process_exited := True
+				end
+			end
+		ensure
+			process_exited: process_exited
+		end
 
-    recover_after_wait_failure (a_exit_area: MANAGED_POINTER)
-            -- Force cleanup and recover a known reaped state after wait failure.
-        local
-            status: INTEGER
-        do
-            status := c_force_terminate (native_handle)
-            if status /= 0 then
-                record_native_failure (
-                    new_termination_kind,
-                    "force terminate after wait failure",
-                    "Cannot force process termination after wait failure",
-                    status
-                )
-            end
-            status := c_wait (native_handle, a_exit_area.item)
-            if status = 0 then
-                exit_status := a_exit_area.read_integer_32 (0)
-                process_exited := True
-            else
-                record_native_failure (
-                    new_wait_kind,
-                    "recovery wait",
-                    "Cannot recover process ownership after wait failure",
-                    status
-                )
-                raise_unsafe_lifecycle_failure (
-                    "Cannot restore process ownership after wait failure",
-                    status
-                )
-            end
-        end
+	recover_after_wait_failure (a_exit_area: MANAGED_POINTER)
+			-- Force cleanup and recover a known reaped state after wait failure.
+		local
+			status: INTEGER
+		do
+			status := c_force_terminate (native_handle)
+			if status /= 0 then
+				record_native_failure (new_termination_kind, "force terminate after wait failure", "Cannot force process termination after wait failure", status)
+			end
+			status := c_wait (native_handle, a_exit_area.item)
+			if status = 0 then
+				exit_status := a_exit_area.read_integer_32 (0)
+				process_exited := True
+			else
+				record_native_failure (new_wait_kind, "recovery wait", "Cannot recover process ownership after wait failure", status)
+				raise_unsafe_lifecycle_failure ("Cannot restore process ownership after wait failure", status)
+			end
+		end
 
-    io_finished: BOOLEAN
-            -- Have all launched standard-I/O workers terminated?
-        do
-            Result :=
-                (not stdout_reader_launched or else
-                    (attached stdout_reader as out_reader and then out_reader.is_finished)) and then
-                (not stderr_reader_launched or else
-                    (attached stderr_reader as err_reader and then err_reader.is_finished)) and then
-                (not stdin_writer_launched or else
-                    (attached stdin_writer as in_writer and then in_writer.is_finished))
-        end
+	io_finished: BOOLEAN
+			-- Have all launched standard-I/O workers terminated?
+		do
+			Result := (not stdout_reader_launched or else (attached stdout_reader as out_reader and then out_reader.is_finished)) and then (not stderr_reader_launched or else (attached stderr_reader as err_reader and then err_reader.is_finished)) and then (not stdin_writer_launched or else (attached stdin_writer as in_writer and then in_writer.is_finished))
+		end
 
-    join_workers
-            -- Join every successfully launched I/O worker.
-        do
-            if stdout_reader_launched and then attached stdout_reader as out_reader then
-                out_reader.join
-            end
-            if stderr_reader_launched and then attached stderr_reader as err_reader then
-                err_reader.join
-            end
-            if stdin_writer_launched and then attached stdin_writer as in_writer then
-                in_writer.join
-            end
-        ensure
-            finished: io_finished
-        end
+	join_workers
+			-- Join every successfully launched I/O worker.
+		do
+			if stdout_reader_launched and then attached stdout_reader as out_reader then
+				out_reader.join
+			end
+			if stderr_reader_launched and then attached stderr_reader as err_reader then
+				err_reader.join
+			end
+			if stdin_writer_launched and then attached stdin_writer as in_writer then
+				in_writer.join
+			end
+		ensure
+			finished: io_finished
+		end
 
-    complete
-            -- Publish the sole terminal result and release the native handle.
-        require
-            process_exited: process_exited
-            io_finished: io_finished
-        local
-            result_failures: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
-            completed_result: OS_PROCESS_EXECUTION_RESULT
-        do
-            if not is_finished then
-                if attached stdout_reader as out_reader then
-                    stdout_snapshot := out_reader.output.to_string_8
-                end
-                if attached stderr_reader as err_reader then
-                    stderr_snapshot := err_reader.output.to_string_8
-                end
-                if native_handle /= default_pointer then
-                    c_free (native_handle)
-                    native_handle := default_pointer
-                end
-                result_failures := failure_snapshot
-                create completed_result.make (
-                    was_launched,
-                    was_launched and process_exited,
-                    exit_status,
-                    stdout_snapshot,
-                    stderr_snapshot,
-                    result_failures
-                )
-                state_mutex.lock
-                process_execution_result := completed_result
-                finished := True
-                state_mutex.unlock
-            end
-        ensure
-            finished: is_finished
-            result_attached: attached process_execution_result
-            handle_released: native_handle = default_pointer
-        end
+	complete
+			-- Publish the sole terminal result and release the native handle.
+		require
+			process_exited: process_exited
+			io_finished: io_finished
+		local
+			result_failures: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
+			completed_result: OS_PROCESS_EXECUTION_RESULT
+		do
+			if not is_finished then
+				if attached stdout_reader as out_reader then
+					stdout_snapshot := out_reader.output.to_string_8
+				end
+				if attached stderr_reader as err_reader then
+					stderr_snapshot := err_reader.output.to_string_8
+				end
+				if native_handle /= default_pointer then
+					c_free (native_handle)
+					native_handle := default_pointer
+				end
+				result_failures := failure_snapshot
+				create completed_result.make (was_launched, was_launched and process_exited, exit_status, stdout_snapshot, stderr_snapshot, result_failures)
+				state_mutex.lock
+				process_execution_result := completed_result
+				finished := True
+				state_mutex.unlock
+			end
+		ensure
+			finished: is_finished
+			result_attached: attached process_execution_result
+			handle_released: native_handle = default_pointer
+		end
 
 feature {NONE} -- Failures
 
-    record_failure (a_failure: OS_PROCESS_FAILURE)
-            -- Record `a_failure` once per category and operation.
-        local
-            already_recorded: BOOLEAN
-        do
-            state_mutex.lock
-            across failure_storage as failure until already_recorded loop
-                already_recorded :=
-                    failure.kind.same_category (a_failure.kind) and then
-                    failure.operation.same_string (a_failure.operation)
-            end
-            if not already_recorded then
-                failure_storage.extend (a_failure)
-            end
-            state_mutex.unlock
-        end
+	record_failure (a_failure: OS_PROCESS_FAILURE)
+			-- Record `a_failure` once per category and operation.
+		local
+			already_recorded: BOOLEAN
+		do
+			state_mutex.lock
+			across
+				failure_storage
+			as
+				failure
+			until
+				already_recorded
+			loop
+				already_recorded := failure.kind.same_category (a_failure.kind) and then failure.operation.same_string (a_failure.operation)
+			end
+			if not already_recorded then
+				failure_storage.extend (a_failure)
+			end
+			state_mutex.unlock
+		end
 
-    record_native_failure (
-        a_kind: OS_PROCESS_FAILURE_KIND;
-        a_operation: READABLE_STRING_8;
-        a_description: READABLE_STRING_8;
-        a_native_code: INTEGER
-    )
-            -- Record a native failure.
-        require
-            positive_native_code: a_native_code > 0
-        local
-            failure: OS_PROCESS_FAILURE
-        do
-            create failure.make_with_native_code (
-                a_kind, a_operation, a_description, a_native_code
-            )
-            record_failure (failure)
-        end
+	record_native_failure (a_kind: OS_PROCESS_FAILURE_KIND; a_operation: READABLE_STRING_8; a_description: READABLE_STRING_8; a_native_code: INTEGER)
+			-- Record a native failure.
+		require
+			positive_native_code: a_native_code > 0
+		local
+			failure: OS_PROCESS_FAILURE
+		do
+			create failure.make_with_native_code (a_kind, a_operation, a_description, a_native_code)
+			record_failure (failure)
+		end
 
-    record_worker_initialization_failure (a_operation: READABLE_STRING_8)
-            -- Record failure to start one Eiffel I/O worker.
-        local
-            failure: OS_PROCESS_FAILURE
-        do
-            create failure.make (
-                new_worker_initialization_kind,
-                a_operation,
-                "Cannot initialize process I/O worker"
-            )
-            record_failure (failure)
-        end
+	record_worker_initialization_failure (a_operation: READABLE_STRING_8)
+			-- Record failure to start one Eiffel I/O worker.
+		local
+			failure: OS_PROCESS_FAILURE
+		do
+			create failure.make (new_worker_initialization_kind, a_operation, "Cannot initialize process I/O worker")
+			record_failure (failure)
+		end
 
-    has_worker_initialization_failure: BOOLEAN
-            -- Has any I/O worker failed to start?
-        local
-            snapshot: ARRAYED_LIST [OS_PROCESS_FAILURE]
-        do
-            state_mutex.lock
-            snapshot := failure_storage.twin
-            state_mutex.unlock
-            across snapshot as failure until Result loop
-                Result := failure.kind.is_worker_initialization
-            end
-        end
+	has_worker_initialization_failure: BOOLEAN
+			-- Has any I/O worker failed to start?
+		local
+			snapshot: ARRAYED_LIST [OS_PROCESS_FAILURE]
+		do
+			state_mutex.lock
+			snapshot := failure_storage.twin
+			state_mutex.unlock
+			across
+				snapshot
+			as
+				failure
+			until
+				Result
+			loop
+				Result := failure.kind.is_worker_initialization
+			end
+		end
 
-    failure_snapshot: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
-            -- All current failures in canonical deterministic order.
-        local
-            raw_failures: ARRAYED_LIST [OS_PROCESS_FAILURE]
-            ordered_failures: ARRAYED_LIST [OS_PROCESS_FAILURE]
-            rank: INTEGER
-        do
-            state_mutex.lock
-            raw_failures := failure_storage.twin
-            state_mutex.unlock
-            if attached stdin_writer as in_writer then
-                append_failures (raw_failures, in_writer.failures)
-            end
-            if attached stdout_reader as out_reader then
-                append_failures (raw_failures, out_reader.failures)
-            end
-            if attached stderr_reader as err_reader then
-                append_failures (raw_failures, err_reader.failures)
-            end
-            create ordered_failures.make (raw_failures.count)
-            from
-                rank := 1
-            until
-                rank > failure_category_count
-            loop
-                across raw_failures as failure loop
-                    if failure_rank (failure.kind) = rank then
-                        ordered_failures.extend (failure)
-                    end
-                end
-                rank := rank + 1
-            end
-            Result := ordered_failures
-        end
+	failure_snapshot: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
+			-- All current failures in canonical deterministic order.
+		local
+			raw_failures: ARRAYED_LIST [OS_PROCESS_FAILURE]
+			ordered_failures: ARRAYED_LIST [OS_PROCESS_FAILURE]
+			rank: INTEGER
+		do
+			state_mutex.lock
+			raw_failures := failure_storage.twin
+			state_mutex.unlock
+			if attached stdin_writer as in_writer then
+				append_failures (raw_failures, in_writer.failures)
+			end
+			if attached stdout_reader as out_reader then
+				append_failures (raw_failures, out_reader.failures)
+			end
+			if attached stderr_reader as err_reader then
+				append_failures (raw_failures, err_reader.failures)
+			end
+			create ordered_failures.make (raw_failures.count)
+			from
+				rank := 1
+			until
+				rank > failure_category_count
+			loop
+				across
+					raw_failures
+				as
+					failure
+				loop
+					if failure_rank (failure.kind) = rank then
+						ordered_failures.extend (failure)
+					end
+				end
+				rank := rank + 1
+			end
+			Result := ordered_failures
+		end
 
-    append_failures (
-        a_target: ARRAYED_LIST [OS_PROCESS_FAILURE];
-        a_source: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
-    )
-            -- Append `a_source` to `a_target`.
-        do
-            across a_source as failure loop
-                a_target.extend (failure)
-            end
-        end
+	append_failures (a_target: ARRAYED_LIST [OS_PROCESS_FAILURE]; a_source: READABLE_INDEXABLE [OS_PROCESS_FAILURE])
+			-- Append `a_source` to `a_target`.
+		do
+			across
+				a_source
+			as
+				failure
+			loop
+				a_target.extend (failure)
+			end
+		end
 
-    failure_rank (a_kind: OS_PROCESS_FAILURE_KIND): INTEGER
-            -- Canonical ordering rank of `a_kind`.
-        do
-            if a_kind.is_launch then
-                Result := 1
-            elseif a_kind.is_worker_initialization then
-                Result := 2
-            elseif a_kind.is_poll then
-                Result := 3
-            elseif a_kind.is_termination then
-                Result := 4
-            elseif a_kind.is_wait then
-                Result := 5
-            elseif a_kind.is_stdin_write then
-                Result := 6
-            elseif a_kind.is_stdin_close then
-                Result := 7
-            elseif a_kind.is_stdout_read then
-                Result := 8
-            elseif a_kind.is_stdout_handler then
-                Result := 9
-            elseif a_kind.is_stderr_read then
-                Result := 10
-            else
-                Result := 11
-            end
-        ensure
-            valid_rank: Result >= 1 and Result <= failure_category_count
-        end
+	failure_rank (a_kind: OS_PROCESS_FAILURE_KIND): INTEGER
+			-- Canonical ordering rank of `a_kind`.
+		do
+			if a_kind.is_launch then
+				Result := 1
+			elseif a_kind.is_worker_initialization then
+				Result := 2
+			elseif a_kind.is_poll then
+				Result := 3
+			elseif a_kind.is_termination then
+				Result := 4
+			elseif a_kind.is_wait then
+				Result := 5
+			elseif a_kind.is_stdin_write then
+				Result := 6
+			elseif a_kind.is_stdin_close then
+				Result := 7
+			elseif a_kind.is_stdout_read then
+				Result := 8
+			elseif a_kind.is_stdout_handler then
+				Result := 9
+			elseif a_kind.is_stderr_read then
+				Result := 10
+			else
+				Result := 11
+			end
+		ensure
+			valid_rank: Result >= 1 and Result <= failure_category_count
+		end
 
 feature {NONE} -- Failure-kind factories
 
-    new_launch_kind: OS_PROCESS_FAILURE_KIND
-        do create Result.make_launch end
+	new_launch_kind: OS_PROCESS_FAILURE_KIND
+		do
+			create Result.make_launch
+		end
 
-    new_stdin_close_kind: OS_PROCESS_FAILURE_KIND
-        do create Result.make_stdin_close end
+	new_stdin_close_kind: OS_PROCESS_FAILURE_KIND
+		do
+			create Result.make_stdin_close
+		end
 
-    new_poll_kind: OS_PROCESS_FAILURE_KIND
-        do create Result.make_poll end
+	new_poll_kind: OS_PROCESS_FAILURE_KIND
+		do
+			create Result.make_poll
+		end
 
-    new_wait_kind: OS_PROCESS_FAILURE_KIND
-        do create Result.make_wait end
+	new_wait_kind: OS_PROCESS_FAILURE_KIND
+		do
+			create Result.make_wait
+		end
 
-    new_termination_kind: OS_PROCESS_FAILURE_KIND
-        do create Result.make_termination end
+	new_termination_kind: OS_PROCESS_FAILURE_KIND
+		do
+			create Result.make_termination
+		end
 
-    new_worker_initialization_kind: OS_PROCESS_FAILURE_KIND
-        do create Result.make_worker_initialization end
+	new_worker_initialization_kind: OS_PROCESS_FAILURE_KIND
+		do
+			create Result.make_worker_initialization
+		end
 
 feature {NONE} -- Conversion
 
-    utf_8 (a_text: READABLE_STRING_GENERAL): STRING_8
-            -- UTF-8 representation of `a_text`.
-        do
-            Result := {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (a_text)
-        end
+	utf_8 (a_text: READABLE_STRING_GENERAL): STRING_8
+			-- UTF-8 representation of `a_text`.
+		do
+			Result := {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (a_text)
+		end
 
 feature {NONE} -- Exceptional invariant recovery
 
-    raise_unsafe_lifecycle_failure (a_operation: READABLE_STRING_8; a_code: INTEGER)
-            -- Raise because safe native child ownership could not be restored.
-        local
-            message: STRING_8
-        do
-            create message.make_from_string (a_operation)
-            message.append (" (native error ")
-            message.append_integer (a_code)
-            message.append_character (')')
-            (create {EXCEPTIONS}).raise (message)
-        end
+	raise_unsafe_lifecycle_failure (a_operation: READABLE_STRING_8; a_code: INTEGER)
+			-- Raise because safe native child ownership could not be restored.
+		local
+			message: STRING_8
+		do
+			create message.make_from_string (a_operation)
+			message.append (" (native error ")
+			message.append_integer (a_code)
+			message.append_character (')')
+			(create {EXCEPTIONS}).raise (message)
+		end
 
 feature {NONE} -- Native bridge
 
-    c_start (a_executable, a_arguments, a_working_directory, a_error: POINTER): POINTER
-        external "C use <subprocess.h>" alias "os_process_start" end
+	c_start (a_executable, a_arguments, a_working_directory, a_error: POINTER): POINTER
+		external
+			"C use <subprocess.h>"
+		alias
+			"os_process_start"
+		end
 
-    c_poll (a_process, a_finished, a_exit_code: POINTER): INTEGER
-        external "C use <subprocess.h>" alias "os_process_poll" end
+	c_poll (a_process, a_finished, a_exit_code: POINTER): INTEGER
+		external
+			"C use <subprocess.h>"
+		alias
+			"os_process_poll"
+		end
 
-    c_wait (a_process, a_exit_code: POINTER): INTEGER
-        external "C blocking use <subprocess.h>" alias "os_process_wait" end
+	c_wait (a_process, a_exit_code: POINTER): INTEGER
+		external
+			"C blocking use <subprocess.h>"
+		alias
+			"os_process_wait"
+		end
 
-    c_terminate (a_process: POINTER): INTEGER
-        external "C use <subprocess.h>" alias "os_process_terminate" end
+	c_terminate (a_process: POINTER): INTEGER
+		external
+			"C use <subprocess.h>"
+		alias
+			"os_process_terminate"
+		end
 
-    c_force_terminate (a_process: POINTER): INTEGER
-        external "C use <subprocess.h>" alias "os_process_force_terminate" end
+	c_force_terminate (a_process: POINTER): INTEGER
+		external
+			"C use <subprocess.h>"
+		alias
+			"os_process_force_terminate"
+		end
 
-    c_close_stdin (a_process: POINTER): INTEGER
-        external "C use <subprocess.h>" alias "os_process_close_stdin" end
+	c_close_stdin (a_process: POINTER): INTEGER
+		external
+			"C use <subprocess.h>"
+		alias
+			"os_process_close_stdin"
+		end
 
-    c_free (a_process: POINTER)
-        external "C use <subprocess.h>" alias "os_process_free" end
+	c_free (a_process: POINTER)
+		external
+			"C use <subprocess.h>"
+		alias
+			"os_process_free"
+		end
 
 feature {NONE} -- Implementation
 
-    native_handle: POINTER
+	native_handle: POINTER
 
-    stdout_reader: detachable OS_PROCESS_PIPE_READER
+	stdout_reader: detachable OS_PROCESS_PIPE_READER
 
-    stderr_reader: detachable OS_PROCESS_PIPE_READER
+	stderr_reader: detachable OS_PROCESS_PIPE_READER
 
-    stdin_writer: detachable OS_PROCESS_PIPE_WRITER
+	stdin_writer: detachable OS_PROCESS_PIPE_WRITER
 
-    stdout_reader_launched: BOOLEAN
+	stdout_reader_launched: BOOLEAN
 
-    stderr_reader_launched: BOOLEAN
+	stderr_reader_launched: BOOLEAN
 
-    stdin_writer_launched: BOOLEAN
+	stdin_writer_launched: BOOLEAN
 
-    stdout_snapshot: STRING_8
+	stdout_snapshot: STRING_8
 
-    stderr_snapshot: STRING_8
+	stderr_snapshot: STRING_8
 
-    process_execution_result: detachable OS_PROCESS_EXECUTION_RESULT
+	process_execution_result: detachable OS_PROCESS_EXECUTION_RESULT
 
-    failure_storage: ARRAYED_LIST [OS_PROCESS_FAILURE]
+	failure_storage: ARRAYED_LIST [OS_PROCESS_FAILURE]
 
-    lifecycle_mutex: MUTEX
+	lifecycle_mutex: MUTEX
 
-    state_mutex: MUTEX
+	state_mutex: MUTEX
 
-    was_launched: BOOLEAN
+	was_launched: BOOLEAN
 
-    exit_status: INTEGER
+	exit_status: INTEGER
 
-    process_exited: BOOLEAN
+	process_exited: BOOLEAN
 
-    finished: BOOLEAN
+	finished: BOOLEAN
 
-    failure_category_count: INTEGER = 11
+	failure_category_count: INTEGER = 11
 
 invariant
-    finished_process_exited: finished implies process_exited
-    finished_handle_released: finished implies native_handle = default_pointer
-    finished_has_result: finished implies attached process_execution_result
-    result_is_terminal: attached process_execution_result implies finished
-    handle_belongs_to_launched_process: native_handle /= default_pointer implies was_launched
+
+	finished_process_exited: finished implies process_exited
+	finished_handle_released: finished implies native_handle = default_pointer
+	finished_has_result: finished implies attached process_execution_result
+	result_is_terminal: attached process_execution_result implies finished
+	handle_belongs_to_launched_process: native_handle /= default_pointer implies was_launched
 
 end

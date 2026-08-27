@@ -24,9 +24,9 @@ with EiffelStudio and Gobo Eiffel on Linux, macOS, and Windows.
 
 | Class | Purpose |
 | --- | --- |
-| [`OS_COMMAND`](src/process/os_command.e) | Configure an executable, arguments, input, and working directory, then start independent executions |
-| [`OS_PROCESS`](src/process/backend/native/os_process.e) | Poll, wait for, or terminate a running process |
-| [`OS_PROCESS_RESULT`](src/process/os_process_result.e) | Inspect launch status, exit code, standard output, and standard error |
+| [`OS_COMMAND`](src/process/os_command.e) | Configure and sequentially execute a command, including polling, waiting, and termination |
+| [`OS_PROCESS_EXECUTION_RESULT`](src/process/os_process_execution_result.e) | Inspect launch status, optional exit code, captured output, and structured failures |
+| [`OS_PROCESS_FAILURE`](src/process/os_process_failure.e) | Inspect one portable process-library failure and its optional native code |
 | [`OS_FILE_PATH`](src/file_path/os_file_path.e) | Compose and inspect paths and perform common file and directory operations |
 
 Both Eiffel compilers use the same native C11 process backend. The platform
@@ -84,23 +84,28 @@ Run a process with an explicit argument vector and inspect its result:
 ```eiffel
 local
     command: OS_COMMAND
-    process_result: OS_PROCESS_RESULT
+    process_result: OS_PROCESS_EXECUTION_RESULT
 do
     create command.make ("git", << "status", "--short" >>)
-    process_result := command.run
+    command.run
+    process_result := command.execution_result
 
     if process_result.successful then
         io.put_string (process_result.stdout)
     else
         io.error.put_string (process_result.stderr)
+        across process_result.failures as failure loop
+            io.error.put_string (failure.description)
+            io.error.put_new_line
+        end
     end
 end
 ```
 
-`run` waits for completion, captures both output streams, and returns an
-`OS_PROCESS_RESULT`. Its `successful` query is true only when the child was
-launched and exited with code zero. The same command can start multiple
-independent executions.
+`run` waits for completion and records an `OS_PROCESS_EXECUTION_RESULT` in
+`execution_result`. `successful` is true only when the child was launched, has
+an exit code of zero, and the library recorded no failures. One `OS_COMMAND`
+can be executed again after its previous execution is finished.
 
 Set optional input or a working directory before calling `run` or `start`:
 
@@ -121,8 +126,29 @@ This string-based parameter replaces the earlier direct `OS_FILE_PATH`
 parameter so that the process module remains independent of the file-path
 module.
 
-Use `start_with_handlers` to receive output while a process runs. See the
-complete [streaming example](src/application.e).
+Use `start_streaming` to receive output while a process runs, then call
+`wait_for_exit`:
+
+```eiffel
+command.start_streaming (agent on_stdout, agent on_stderr)
+command.wait_for_exit
+```
+
+For nonblocking progress checks, poll explicitly:
+
+```eiffel
+command.start
+from
+until
+    command.finished
+loop
+    command.poll
+end
+```
+
+`finished` is passive recorded state. A false value may be stale until `poll`
+or `wait_for_exit` updates it; a true value remains true until the next start.
+See the complete [streaming example](src/application.e).
 
 Work with paths through the same portable API:
 
@@ -163,19 +189,36 @@ not text.
   arguments do not need shell escaping.
 - `make_shell` is available for platform shell syntax. Do not concatenate
   untrusted input into a shell command.
-- `OS_COMMAND` keeps copied configuration, and each started process retains its
-  own input and working-directory snapshots. Input and captured output are raw
+- `OS_COMMAND` keeps copied configuration between sequential executions. Input
+  and captured output are raw
   `READABLE_STRING_8` bytes; the library does not convert encodings or newlines.
   The child receives the configured input followed by EOF.
-- Every process created by `start` or `start_with_handlers` must be completed
-  with `wait` or repeated `poll` calls. `terminate` only requests termination
-  and must also be followed by `wait` or polling.
-- `is_finished` reports state recorded by `poll` or `wait`; `outcome` is
-  available only after the process and its I/O workers have completed.
+- `start`, `run`, and `start_streaming` cannot overlap on one command. A new
+  execution is allowed only when `can_start` is true.
+- Every execution created by `start` or `start_streaming` must reach completion
+  through `wait_for_exit` or repeated `poll` calls. `terminate` only requests
+  platform-dependent termination and must still be followed by waiting or
+  polling. It does not promise graceful shutdown and affects only the immediate
+  child, not its process tree.
+- Garbage collection does not terminate or wait for an abandoned child. Client
+  code must retain the command and guarantee `terminate`/`wait_for_exit` from
+  its cleanup or rescue path.
+- `execution_result` is available only after the child and all I/O workers have
+  completed and native resources have been released.
 - Output callbacks may run concurrently. Ordering is preserved within each
-  stream, but not between standard output and standard error.
-- A launch failure produces `was_launched = False` and exit code `127`. A child
-  that exits with the same code still has `was_launched = True`.
+  stream, but not between standard output and standard error. Callback
+  exceptions are contained and returned as structured failures; captured bytes
+  remain available. Callbacks that mutate shared client state must provide their
+  own synchronization and must not reenter lifecycle commands on the same
+  `OS_COMMAND`.
+- A launch failure produces `was_launched = False`, `has_exit_code = False`,
+  and a launch failure value. A real child exit of `127` has
+  `was_launched = True` and `has_exit_code = True`.
+- Executable names, arguments, shell commands, and working directories reject
+  embedded NUL characters. Standard input is a byte stream and may contain NUL.
+- A descendant can inherit the stdout or stderr pipe. In that case the direct
+  child may already have exited while `wait_for_exit` still waits for reader
+  EOF.
 
 The linked public classes contain the complete feature contracts and lifecycle
 details.

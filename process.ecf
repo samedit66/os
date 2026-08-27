@@ -33,7 +33,6 @@
             </condition>
         </external_library>
         <cluster name="process" location="src/process" recursive="false"/>
-        <cluster name="process_native" location="src/process/backend/native" recursive="true"/>
     </target>
     <target name="os_process_test_child" extends="os_process">
         <root class="OS_PROCESS_TEST_CHILD" feature="make"/>

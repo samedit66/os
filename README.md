@@ -24,7 +24,7 @@ with EiffelStudio and Gobo Eiffel on Linux, macOS, and Windows.
 
 | Class | Purpose |
 | --- | --- |
-| [`OS_COMMAND`](src/process/os_command.e) | Configure and sequentially execute a command, including polling, waiting, and termination |
+| [`OS_COMMAND`](src/process/os_command.e) | Configure and sequentially execute a command, including standard I/O, deadlines, waiting, and tree termination |
 | [`OS_ENVIRONMENT`](src/process/os_environment.e) | Store a copied environment and resolve executables through its `PATH` |
 | [`OS_PROCESS_EXECUTION_RESULT`](src/process/os_process_execution_result.e) | Inspect launch status, optional exit code, captured output, and structured failures |
 | [`OS_PROCESS_FAILURE`](src/process/os_process_failure.e) | Inspect one portable process-library failure and its optional native code |
@@ -109,8 +109,9 @@ end
 
 `run` waits for completion and records an `OS_PROCESS_EXECUTION_RESULT` in
 `execution_result`. `successful` is true only when the child was launched, has
-an exit code of zero, and the library recorded no failures. One `OS_COMMAND`
-can be executed again after its previous execution is finished.
+an exit code of zero, was not terminated or timed out, and the library recorded
+no failures. One `OS_COMMAND` can be executed again after its previous execution
+is finished.
 
 Set optional input or a working directory before calling `run` or `start`:
 
@@ -118,6 +119,28 @@ Set optional input or a working directory before calling `run` or `start`:
 command.set_working_directory ("/path/to/repository")
 command.set_input ("input bytes%N")
 ```
+
+Standard input is an empty pipe by default, while standard output and error are
+captured. Each stream can instead be inherited or discarded without buffering
+it in Eiffel memory:
+
+```eiffel
+command.inherit_stdin
+command.inherit_stdout
+command.discard_stderr
+```
+
+Use `capture_stdout` or `capture_stderr` to switch an output stream back to
+capture. `set_input` switches stdin back to a pipe. `merge_stderr` redirects
+stderr to the selected stdout destination; when stdout is captured, both
+streams appear in `execution_result.stdout` and no separate stderr snapshot
+exists. Check `stdout_was_captured`, `stderr_was_captured`, and
+`stderr_was_merged` before reading conditional result fields.
+
+On POSIX, synchronous `run` can hand inherited terminal stdin to the child
+process group and restores the foreground group afterward. Asynchronous
+`start` and `start_streaming` reject inherited terminal stdin, but accept an
+inherited nonterminal stream. The library does not create a PTY.
 
 Each command also owns an environment snapshot. Change it without modifying the
 environment of the current application:
@@ -163,29 +186,42 @@ This string-based parameter replaces the earlier direct `OS_FILE_PATH`
 parameter so that the process module remains independent of the file-path
 module.
 
-Use `start_streaming` to receive output while a process runs, then call
-`wait_for_exit`:
+Use `start_streaming` to receive captured output while a process runs. Call
+`wait_for_exit` when the current control flow needs to synchronize with the
+result:
 
 ```eiffel
 command.start_streaming (agent on_stdout, agent on_stderr)
 command.wait_for_exit
 ```
 
-For nonblocking progress checks, poll explicitly:
+Supervision is autonomous. `finished` becomes true after native waiting, I/O
+cleanup, and result publication; it does not need a poll call:
 
 ```eiffel
 command.start
-from
-until
-    command.finished
-loop
-    command.poll
+-- Later, from the application's event loop:
+if command.finished then
+    process_result := command.execution_result
 end
 ```
 
-`finished` is passive recorded state. A false value may be stale until `poll`
-or `wait_for_exit` updates it; a true value remains true until the next start.
-See the complete [streaming example](src/application.e).
+Configure an overall execution deadline in milliseconds when needed:
+
+```eiffel
+command.set_timeout_milliseconds (30_000)
+command.run
+if command.execution_result.was_timed_out then
+    io.error.put_string ("command timed out%N")
+end
+```
+
+`clear_timeout` restores unlimited execution. A deadline covers both the direct
+process and I/O completion, including a descendant that inherited a capture
+pipe. On expiration the process tree is killed, pipes receive a one-second drain
+grace, and any remaining native I/O is cancelled. `output_was_cut_off` records
+whether a captured stream failed to reach EOF during that grace. See the
+complete [streaming example](src/application.e).
 
 Work with paths through the same portable API:
 
@@ -244,14 +280,15 @@ not text.
   The child receives the configured input followed by EOF.
 - `start`, `run`, and `start_streaming` cannot overlap on one command. A new
   execution is allowed only when `can_start` is true.
-- Every execution created by `start` or `start_streaming` must reach completion
-  through `wait_for_exit` or repeated `poll` calls. `terminate` only requests
-  platform-dependent termination and must still be followed by waiting or
-  polling. It does not promise graceful shutdown and affects only the immediate
-  child, not its process tree.
-- Garbage collection does not terminate or wait for an abandoned child. Client
-  code must retain the command and guarantee `terminate`/`wait_for_exit` from
-  its cleanup or rescue path.
+- Every execution owns a POSIX process group or Windows Job Object. `terminate`
+  forcefully kills that managed tree and returns without requiring a later
+  `wait_for_exit`; the autonomous supervisor still reaps and publishes the
+  result. Termination is idempotent and is not a graceful-shutdown request.
+- On POSIX, a descendant that deliberately calls `setsid` or moves to another
+  process group escapes this guarantee. Windows descendants remain in the Job
+  Object because breakaway is not enabled.
+- The command retains its current process until autonomous cleanup completes.
+  Clients need `wait_for_exit` only when they must synchronize before continuing.
 - `execution_result` is available only after the child and all I/O workers have
   completed and native resources have been released.
 - Output callbacks may run concurrently. Ordering is preserved within each
@@ -259,7 +296,8 @@ not text.
   exceptions are contained and returned as structured failures; captured bytes
   remain available. Callbacks that mutate shared client state must provide their
   own synchronization and must not reenter lifecycle commands on the same
-  `OS_COMMAND`.
+  `OS_COMMAND`. Every callback must eventually return: it runs on its stream
+  worker, and completion necessarily waits for that worker.
 - A launch failure produces `was_launched = False`, `has_exit_code = False`,
   and a launch failure value. A real child exit of `127` has
   `was_launched = True` and `has_exit_code = True`.
@@ -273,9 +311,9 @@ not text.
   process. Windows candidates must be plain files and an extensionless name is
   also tried with `.exe`; final image validation remains the responsibility of
   `CreateProcessW`.
-- A descendant can inherit the stdout or stderr pipe. In that case the direct
-  child may already have exited while `wait_for_exit` still waits for reader
-  EOF.
+- A descendant can inherit a captured stdout or stderr pipe. The execution is
+  not finished until that pipe reaches EOF, even if the direct child exited;
+  configure a timeout when descendant lifetime is not otherwise bounded.
 
 The linked public classes contain the complete feature contracts and lifecycle
 details.
@@ -304,6 +342,6 @@ CI runs the shared suite on Ubuntu, macOS, and Windows.
 ## Scope
 
 The process API focuses on common portable workflows. For features such as
-environment replacement, timeouts, process trees, incremental interactive
-input, or detailed redirection control, use the EiffelStudio `PROCESS` library
-directly.
+incremental interactive input, PTYs, file-backed redirection, graceful signal
+protocols, or enumeration of child PIDs, use a platform-specific process
+library directly.

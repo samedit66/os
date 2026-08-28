@@ -19,7 +19,7 @@ FILE_PATH_NATIVE_OBJECT = $(NATIVE_DIR)/file_path.o
 FILE_PATH_NATIVE_LIBRARY = $(NATIVE_DIR)/libos_file_path.a
 PROJECT_ROOT := $(abspath .)
 GOBO_FLAGS = --variable=GOBO_EIFFEL=ge --ise=25.12 --gelint
-ISE_TEST_FLAGS ?=
+ISE_TEST_FLAGS ?= -clean
 ISE_TEST_CODE_DIR ?= W_code
 EIFFEL_TARGETS ?= file_path.ecf@os_file_path process.ecf@os_process os.ecf@application
 EIFFEL_FORMAT_SOURCES ?= $(shell git ls-files '*.e')
@@ -71,7 +71,7 @@ check-ise:
 	@set -e; for system in $(EIFFEL_TARGETS); do \
 		ecf=$${system%@*}; target=$${system#*@}; \
 		GOBO="$(GOBO)" GOBO_EIFFEL=ise $(EC) -batch -config "$$ecf" \
-			-target "$$target" -ca_default -ca_class -all; \
+			-target "$$target" -clean -ca_default -ca_class -all; \
 	done
 
 format:

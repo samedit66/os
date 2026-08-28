@@ -22,6 +22,7 @@ feature {NONE} -- Initialization
 			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make ("git", <<"--version">>)
+			command.set_timeout_milliseconds (5_000)
 			command.start_streaming (agent on_stdout, agent on_stderr)
 			command.wait_for_exit
 			process_result := command.execution_result

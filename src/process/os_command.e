@@ -378,6 +378,8 @@ feature -- Execution
 		ensure
 			started: has_started
 			current_execution_attached: attached current_process
+				-- Completion additionally relies on every attached callback returning;
+				-- this client obligation cannot be expressed as a runtime assertion.
 		end
 
 	wait_for_exit
@@ -745,10 +747,15 @@ feature {NONE} -- Implementation
 			-- Native stderr routing mode.
 
 	stdin_pipe_mode: INTEGER = 0
+
 	stdin_inherit_mode: INTEGER = 1
+
 	output_capture_mode: INTEGER = 0
+
 	output_inherit_mode: INTEGER = 1
+
 	output_discard_mode: INTEGER = 2
+
 	stderr_merge_mode: INTEGER = 3
 			-- Values shared with the constants in `subprocess.h`.
 

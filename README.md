@@ -100,8 +100,11 @@ waits until the execution result is available.
 Continue with the [getting-started tutorial](docs/tutorial.md), which covers
 installation, process results, timeouts, environments, and file paths. See the
 [reference guide](docs/reference.md) for lifecycle guarantees, stream modes,
-failure semantics, and platform-specific behavior. The complete tutorial
-program is in [`examples/quick_start`](examples/quick_start).
+failure semantics, and platform-specific behavior. The
+[process API comparison](docs/comparison.md) explains where `OS_COMMAND` is
+stronger than the EiffelStudio and Gobo alternatives and where it currently
+has fewer capabilities. The complete tutorial program is in
+[`examples/quick_start`](examples/quick_start).
 
 ## Public API
 

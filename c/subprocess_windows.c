@@ -21,6 +21,7 @@ struct os_process
     HANDLE stdin_write;
     HANDLE stdout_read;
     HANDLE stderr_read;
+    ULONGLONG started_at;
     int exit_code;
     int has_exited;
 };
@@ -301,6 +302,7 @@ static int append_unique_handle(HANDLE handles[], SIZE_T *count, HANDLE handle)
 os_process *os_process_start(const char *executable, char *const arguments[],
                              char *const environment[], const char *working_directory,
                              int stdin_mode, int stdout_mode, int stderr_mode,
+                             int allow_terminal_stdin,
                              int *error_code)
 {
     SECURITY_ATTRIBUTES security = {sizeof(security), NULL, TRUE};
@@ -321,6 +323,7 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     wchar_t *working_directory_wide = NULL;
     os_process *process = NULL;
     DWORD windows_error = ERROR_SUCCESS;
+    ULONGLONG started_at = 0;
 
     if (error_code == NULL)
         return NULL;
@@ -331,7 +334,8 @@ os_process *os_process_start(const char *executable, char *const arguments[],
          stdout_mode != OS_PROCESS_OUTPUT_INHERIT && stdout_mode != OS_PROCESS_OUTPUT_DISCARD) ||
         (stderr_mode != OS_PROCESS_OUTPUT_CAPTURE &&
          stderr_mode != OS_PROCESS_OUTPUT_INHERIT &&
-         stderr_mode != OS_PROCESS_OUTPUT_DISCARD && stderr_mode != OS_PROCESS_STDERR_MERGE))
+         stderr_mode != OS_PROCESS_OUTPUT_DISCARD && stderr_mode != OS_PROCESS_STDERR_MERGE) ||
+        (allow_terminal_stdin != 0 && allow_terminal_stdin != 1))
     {
         *error_code = ERROR_INVALID_PARAMETER;
         return NULL;
@@ -468,6 +472,7 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     /* CreateProcessW does not resolve an executable with the PATH contained in
        lpEnvironment. OS_COMMAND has already resolved application_name so the
        child environment and executable lookup use the same snapshot. */
+    started_at = GetTickCount64();
     if (!CreateProcessW(application_name, command_line, NULL, NULL, TRUE,
                         EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT |
                             CREATE_SUSPENDED,
@@ -525,6 +530,7 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     process->stdin_write = stdin_write;
     process->stdout_read = stdout_read;
     process->stderr_read = stderr_read;
+    process->started_at = started_at;
     process->exit_code = -1;
     stdin_write = NULL;
     stdout_read = NULL;
@@ -614,6 +620,19 @@ int os_process_close_stdin(os_process *process)
     return CloseHandle(handle) ? 0 : error_as_int(GetLastError());
 }
 
+void os_process_cancel_io(os_process *process)
+{
+    if (process != NULL)
+    {
+        /* The Job Object is terminated before cancellation, so descendants no
+           longer own pipe counterparts. Closing here is the final cutoff for a
+           platform pipe operation that nevertheless did not observe EOF. */
+        close_handle(&process->stdin_write);
+        close_handle(&process->stdout_read);
+        close_handle(&process->stderr_read);
+    }
+}
+
 static int store_exit_code(os_process *process, int *exit_code)
 {
     DWORD native_code;
@@ -623,30 +642,6 @@ static int store_exit_code(os_process *process, int *exit_code)
     process->has_exited = 1;
     *exit_code = process->exit_code;
     return 0;
-}
-
-int os_process_poll(os_process *process, int *finished, int *exit_code)
-{
-    DWORD result;
-    if (process == NULL || finished == NULL || exit_code == NULL)
-        return ERROR_INVALID_PARAMETER;
-    if (process->has_exited)
-    {
-        *finished = 1;
-        *exit_code = process->exit_code;
-        return 0;
-    }
-    result = WaitForSingleObject(process->process, 0);
-    if (result == WAIT_TIMEOUT)
-    {
-        *finished = 0;
-        *exit_code = -1;
-        return 0;
-    }
-    if (result != WAIT_OBJECT_0)
-        return error_as_int(GetLastError());
-    *finished = 1;
-    return store_exit_code(process, exit_code);
 }
 
 int os_process_wait(os_process *process, int *exit_code)
@@ -663,6 +658,49 @@ int os_process_wait(os_process *process, int *exit_code)
         return error_as_int(GetLastError());
     }
     return store_exit_code(process, exit_code);
+}
+
+int os_process_timeout_remaining(os_process *process, int timeout_milliseconds)
+{
+    ULONGLONG elapsed;
+    if (process == NULL || timeout_milliseconds <= 0)
+        return 0;
+    elapsed = GetTickCount64() - process->started_at;
+    return elapsed >= (ULONGLONG)timeout_milliseconds
+               ? 0
+               : timeout_milliseconds - (int)elapsed;
+}
+
+int os_process_wait_for(os_process *process, int timeout_milliseconds,
+                        int *timed_out, int *exit_code)
+{
+    DWORD result;
+    int remaining;
+    if (process == NULL || timeout_milliseconds <= 0 || timed_out == NULL || exit_code == NULL)
+        return ERROR_INVALID_PARAMETER;
+    remaining = os_process_timeout_remaining(process, timeout_milliseconds);
+    if (remaining == 0)
+    {
+        *timed_out = 1;
+        *exit_code = -1;
+        return 0;
+    }
+    result = WaitForSingleObject(process->process, (DWORD)remaining);
+    if (result == WAIT_TIMEOUT)
+    {
+        *timed_out = 1;
+        *exit_code = -1;
+        return 0;
+    }
+    if (result != WAIT_OBJECT_0)
+        return error_as_int(GetLastError());
+    *timed_out = 0;
+    return store_exit_code(process, exit_code);
+}
+
+int os_process_restore_terminal(os_process *process)
+{
+    return process == NULL ? ERROR_INVALID_PARAMETER : 0;
 }
 
 int os_process_terminate(os_process *process)

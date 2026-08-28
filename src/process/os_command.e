@@ -11,10 +11,7 @@ note
     ]"
 	author: "samedit66 <samedit66@yandex.ru>"
 	library: "os"
-	warning: "[
-        After `start` or `start_streaming`, call `wait_for_exit` or repeatedly
-        call `poll` until `finished`, including after `terminate`.
-    ]"
+	warning: "The command owns each started execution until autonomous cleanup completes."
 
 class OS_COMMAND
 
@@ -132,10 +129,58 @@ feature -- Change
 	inherit_stdin
 			-- Connect the child directly to Current's inherited standard input.
 			-- No Eiffel writer is created in this mode.
+			-- On POSIX, `run` temporarily gives an inherited terminal to the child
+			-- process group and restores it afterward. Asynchronous `start` and
+			-- `start_streaming` reject terminal stdin; inherited nonterminal input
+			-- remains valid. This API intentionally does not allocate a PTY.
 		require
 			can_start: can_start
 		do
 			set_stdin_mode (stdin_inherit_mode)
+		end
+
+	set_timeout_milliseconds (a_timeout: INTEGER)
+			-- Limit the overall execution to `a_timeout` milliseconds.
+			-- The deadline covers process execution and inherited capture pipes.
+		require
+			can_start: can_start
+			positive_timeout: a_timeout > 0
+		local
+			mutex_locked: BOOLEAN
+		do
+			command_mutex.lock
+			mutex_locked := True
+			if not can_start_unlocked then
+				raise_client_failure ("Cannot change timeout while a command is running")
+			end
+			timeout_milliseconds := a_timeout
+			command_mutex.unlock
+			mutex_locked := False
+		rescue
+			if mutex_locked then
+				command_mutex.unlock
+			end
+		end
+
+	clear_timeout
+			-- Remove the overall execution deadline.
+		require
+			can_start: can_start
+		local
+			mutex_locked: BOOLEAN
+		do
+			command_mutex.lock
+			mutex_locked := True
+			if not can_start_unlocked then
+				raise_client_failure ("Cannot change timeout while a command is running")
+			end
+			timeout_milliseconds := 0
+			command_mutex.unlock
+			mutex_locked := False
+		rescue
+			if mutex_locked then
+				command_mutex.unlock
+			end
 		end
 
 	set_input (a_input: READABLE_STRING_8)
@@ -303,7 +348,7 @@ feature -- Execution
 		require
 			can_start: can_start
 		do
-			start
+			start_execution (Void, Void, True)
 			wait_for_exit
 		ensure
 			started: has_started
@@ -328,58 +373,15 @@ feature -- Execution
 			stderr_callback_requires_capture: attached a_stderr implies stderr_is_captured
 				-- Each attached callback must eventually return. A callback executes on
 				-- its stream worker; waiting for it is part of execution completion.
-		local
-			process: OS_PROCESS
-			launch_directory: PATH
-			resolved_executable: STRING_32
-			mutex_locked: BOOLEAN
 		do
-			command_mutex.lock
-			mutex_locked := True
-			if not can_start_unlocked then
-				raise_client_failure ("Cannot start overlapping command executions")
-			end
-			launch_directory := effective_working_directory_unlocked
-			if environment.has_executable_in (executable, launch_directory) then
-				resolved_executable := environment.executable_path_in (executable, launch_directory)
-				create process.make (resolved_executable, arguments, a_stdout, a_stderr, working_directory, input, environment.entries, stdin_mode, stdout_mode, stderr_mode)
-			else
-				create process.make_unresolved (executable, stdout_mode = output_capture_mode, stderr_mode = output_capture_mode, stderr_mode = stderr_merge_mode)
-			end
-			current_process := process
-			has_started_state := True
-			latest_execution_result := Void
-			finished_state := process.is_finished
-			if finished_state then
-				latest_execution_result := process.execution_result
-			end
-			command_mutex.unlock
-			mutex_locked := False
+			start_execution (a_stdout, a_stderr, False)
 		ensure
 			started: has_started
 			current_execution_attached: attached current_process
-		rescue
-			if mutex_locked then
-				command_mutex.unlock
-			end
-		end
-
-	poll
-			-- Update the recorded execution state without waiting.
-		require
-			started: has_started
-		local
-			process: OS_PROCESS
-		do
-			process := attached_process
-			process.poll
-			publish_if_current (process)
-		ensure
-			finished_is_stable: old finished implies finished
 		end
 
 	wait_for_exit
-			-- Wait for child, I/O workers, cleanup, and result publication.
+			-- Wait until autonomous cleanup and result publication have completed.
 		require
 			started: has_started
 		local
@@ -387,7 +389,6 @@ feature -- Execution
 		do
 			process := attached_process
 			process.wait
-			publish_if_current (process)
 		ensure
 			finished: finished
 		end
@@ -403,7 +404,6 @@ feature -- Execution
 		do
 			process := attached_process
 			process.terminate
-			publish_if_current (process)
 		end
 
 feature -- Access
@@ -437,33 +437,20 @@ feature -- Access
 			-- Terminal result of the latest execution.
 		require
 			finished: finished
-		local
-			snapshot: detachable OS_PROCESS_EXECUTION_RESULT
 		do
-			command_mutex.lock
-			snapshot := latest_execution_result
-			command_mutex.unlock
-			check
-				attached snapshot as completed_result
-			then
-				Result := completed_result
-			end
+			Result := attached_process.execution_result
 		end
 
 	failures: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
 			-- Defensive snapshot of failures from the latest execution.
 		local
 			process: detachable OS_PROCESS
-			completed_result: detachable OS_PROCESS_EXECUTION_RESULT
 			snapshot: ARRAYED_LIST [OS_PROCESS_FAILURE]
 		do
 			command_mutex.lock
 			process := current_process
-			completed_result := latest_execution_result
 			command_mutex.unlock
-			if attached completed_result as completed then
-				Result := completed.failures
-			elseif attached process as active_process then
+			if attached process as active_process then
 				Result := active_process.failures
 			else
 				create snapshot.make (0)
@@ -514,11 +501,14 @@ feature -- Status report
 		end
 
 	finished: BOOLEAN
-			-- Is the terminal result of the latest execution recorded?
+			-- Is the latest execution's terminal result available?
+		local
+			process: detachable OS_PROCESS
 		do
 			command_mutex.lock
-			Result := finished_state
+			process := current_process
 			command_mutex.unlock
+			Result := attached process as active_process and then active_process.is_finished
 		end
 
 	can_start: BOOLEAN
@@ -551,6 +541,36 @@ feature -- Status report
 		end
 
 feature {NONE} -- State publication
+
+	start_execution (a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_allow_terminal_stdin: BOOLEAN)
+			-- Start one execution, allowing a foreground terminal handoff only for `run`.
+		local
+			process: OS_PROCESS
+			launch_directory: PATH
+			resolved_executable: STRING_32
+			mutex_locked: BOOLEAN
+		do
+			command_mutex.lock
+			mutex_locked := True
+			if not can_start_unlocked then
+				raise_client_failure ("Cannot start overlapping command executions")
+			end
+			launch_directory := effective_working_directory_unlocked
+			if environment.has_executable_in (executable, launch_directory) then
+				resolved_executable := environment.executable_path_in (executable, launch_directory)
+				create process.make (resolved_executable, arguments, a_stdout, a_stderr, working_directory, input, environment.entries, stdin_mode, stdout_mode, stderr_mode, timeout_milliseconds, a_allow_terminal_stdin)
+			else
+				create process.make_unresolved (executable, stdout_mode = output_capture_mode, stderr_mode = output_capture_mode, stderr_mode = stderr_merge_mode)
+			end
+			current_process := process
+			has_started_state := True
+			command_mutex.unlock
+			mutex_locked := False
+		rescue
+			if mutex_locked then
+				command_mutex.unlock
+			end
+		end
 
 	set_stdin_mode (a_mode: INTEGER)
 			-- Set the native stdin routing mode.
@@ -630,21 +650,10 @@ feature {NONE} -- State publication
 			end
 		end
 
-	publish_if_current (a_process: OS_PROCESS)
-			-- Publish `a_process` if it is still Current's execution.
-		do
-			command_mutex.lock
-			if current_process = a_process and then a_process.is_finished then
-				latest_execution_result := a_process.execution_result
-				finished_state := True
-			end
-			command_mutex.unlock
-		end
-
 	can_start_unlocked: BOOLEAN
 			-- `can_start` while `command_mutex` is held.
 		do
-			Result := not has_started_state or else finished_state
+			Result := not has_started_state or else (attached current_process as process and then process.is_finished)
 		end
 
 	effective_working_directory_unlocked: PATH
@@ -743,6 +752,9 @@ feature {NONE} -- Implementation
 	stderr_merge_mode: INTEGER = 3
 			-- Values shared with the constants in `subprocess.h`.
 
+	timeout_milliseconds: INTEGER
+			-- Overall execution deadline, or zero when unlimited.
+
 	environment: OS_ENVIRONMENT
 			-- Owned variable snapshot and executable resolver.
 
@@ -752,23 +764,13 @@ feature {NONE} -- Implementation
 	current_process: detachable OS_PROCESS
 			-- Process owned by the latest execution.
 
-	latest_execution_result: detachable OS_PROCESS_EXECUTION_RESULT
-			-- Published terminal result of the latest execution.
-
 	has_started_state: BOOLEAN
 			-- Has at least one execution been started?
-
-	finished_state: BOOLEAN
-			-- Is the latest execution terminal and published?
 
 invariant
 
 	executable_not_empty: not executable.is_empty
-	finished_requires_start: finished_state implies has_started_state
 	not_started_has_no_process: not has_started_state implies current_process = Void
-	active_has_process: has_started_state and not finished_state implies attached current_process
-	active_has_no_result: has_started_state and not finished_state implies latest_execution_result = Void
-	finished_has_process: finished_state implies attached current_process
-	finished_has_result: finished_state implies attached latest_execution_result
+	started_has_process: has_started_state implies attached current_process
 
 end

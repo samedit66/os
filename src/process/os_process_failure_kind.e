@@ -18,7 +18,6 @@ create {OS_PROCESS, OS_PROCESS_PIPE_READER, OS_PROCESS_PIPE_WRITER}
 	make_stderr_read,
 	make_stdout_handler,
 	make_stderr_handler,
-	make_poll,
 	make_wait,
 	make_termination,
 	make_worker_initialization
@@ -79,14 +78,6 @@ feature {NONE} -- Initialization
 			code := stderr_handler_code
 		ensure
 			stderr_handler: is_stderr_handler
-		end
-
-	make_poll
-			-- Select a polling failure.
-		do
-			code := poll_code
-		ensure
-			poll: is_poll
 		end
 
 	make_wait
@@ -157,12 +148,6 @@ feature -- Status report
 			Result := code = stderr_handler_code
 		end
 
-	is_poll: BOOLEAN
-			-- Is this a polling failure?
-		do
-			Result := code = poll_code
-		end
-
 	is_wait: BOOLEAN
 			-- Is this a waiting failure?
 		do
@@ -194,10 +179,10 @@ feature {OS_PROCESS_FAILURE_KIND} -- Implementation
 
 feature {NONE} -- Constants
 
-	launch_code, stdin_write_code, stdin_close_code, stdout_read_code, stderr_read_code, stdout_handler_code, stderr_handler_code, poll_code, wait_code, termination_code, worker_initialization_code: INTEGER = unique
+	launch_code, stdin_write_code, stdin_close_code, stdout_read_code, stderr_read_code, stdout_handler_code, stderr_handler_code, wait_code, termination_code, worker_initialization_code: INTEGER = unique
 
 invariant
 
-	known_category: is_launch or is_stdin_write or is_stdin_close or is_stdout_read or is_stderr_read or is_stdout_handler or is_stderr_handler or is_poll or is_wait or is_termination or is_worker_initialization
+	known_category: is_launch or is_stdin_write or is_stdin_close or is_stdout_read or is_stderr_read or is_stdout_handler or is_stderr_handler or is_wait or is_termination or is_worker_initialization
 
 end

@@ -41,12 +41,13 @@ extern "C"
     os_process *os_process_start(const char *executable, char *const arguments[],
                                  char *const environment[], const char *working_directory,
                                  int stdin_mode, int stdout_mode, int stderr_mode,
+                                 int allow_terminal_stdin,
                                  int *error_code);
 
     /*
      * Exactly one caller may use each standard-I/O endpoint. The stdout reader,
      * stderr reader, and stdin writer may run concurrently with one another and
-     * with poll or wait. A read or write returns a positive byte count, zero for
+     * with native waiting. A read or write returns a positive byte count, zero for
      * EOF or a normally closed pipe, and a negative platform error code. Closing
      * stdin is idempotent and returns zero or a positive platform error code; it
      * must be serialized with writes by the caller.
@@ -55,16 +56,20 @@ extern "C"
     int os_process_read_stderr(os_process *process, void *buffer, int capacity);
     int os_process_write_stdin(os_process *process, const void *buffer, int capacity);
     int os_process_close_stdin(os_process *process);
+    void os_process_cancel_io(os_process *process);
 
     /*
      * Lifecycle calls return zero on success or a positive platform error code.
-     * Poll and wait retain the exit code, so either may be repeated after reaping
-     * the child. Lifecycle calls must be serialized with one another. Terminate
-     * forcefully kills the managed process group or Job Object; the caller must
-     * still poll or wait. Exit-code interpretation is platform-specific.
+     * Wait retains the exit code and may be repeated after reaping the child.
+     * Termination may run concurrently with a wait and forcefully kills the
+     * managed process group or Job Object. Exit-code interpretation is
+     * platform-specific.
      */
-    int os_process_poll(os_process *process, int *finished, int *exit_code);
     int os_process_wait(os_process *process, int *exit_code);
+    int os_process_wait_for(os_process *process, int timeout_milliseconds,
+                            int *timed_out, int *exit_code);
+    int os_process_timeout_remaining(os_process *process, int timeout_milliseconds);
+    int os_process_restore_terminal(os_process *process);
     int os_process_terminate(os_process *process);
 
     /*

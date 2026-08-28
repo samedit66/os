@@ -18,20 +18,11 @@ inherit
 
 create
 
-	make_poll,
 	make_wait,
 	make_terminate,
 	make_set_environment
 
 feature {NONE} -- Initialization
-
-	make_poll (a_command: OS_COMMAND)
-			-- Prepare one polling call on `a_command`.
-		do
-			command := a_command
-			operation := poll_operation
-			make_thread
-		end
 
 	make_wait (a_command: OS_COMMAND)
 			-- Prepare one waiting call on `a_command`.
@@ -72,9 +63,7 @@ feature {NONE} -- Execution
 			if retried then
 				successful := False
 			else
-				if operation = poll_operation then
-					command.poll
-				elseif operation = wait_operation then
+				if operation = wait_operation then
 					command.wait_for_exit
 				elseif operation = terminate_operation then
 					command.terminate
@@ -96,8 +85,6 @@ feature {NONE} -- Implementation
 	operation: INTEGER
 			-- Selected lifecycle operation.
 
-	poll_operation: INTEGER = 2
-
 	wait_operation: INTEGER = 3
 
 	terminate_operation: INTEGER = 4
@@ -106,6 +93,6 @@ feature {NONE} -- Implementation
 
 invariant
 
-	valid_operation: operation = poll_operation or operation = wait_operation or operation = terminate_operation or operation = set_environment_operation
+	valid_operation: operation = wait_operation or operation = terminate_operation or operation = set_environment_operation
 
 end

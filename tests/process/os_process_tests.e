@@ -141,8 +141,8 @@ feature -- Test
 			assert_integers_equal ("callback output retained", large_block_size * large_block_count, process_result.stdout.count)
 		end
 
-	test_polled_callback_failure
-			-- Report the same callback failure through nonblocking polling.
+	test_autonomous_callback_failure
+			-- Publish a callback failure without an explicit lifecycle call.
 		local
 			command: OS_COMMAND
 			environment: EXECUTION_ENVIRONMENT
@@ -153,21 +153,19 @@ feature -- Test
 			command.start_streaming (agent fail_stdout, Void)
 			create environment
 			from
-				command.poll
 			until
-				command.finished or attempts = polling_attempt_limit
+				command.finished or attempts = completion_attempt_limit
 			loop
-				environment.sleep (polling_interval)
+				environment.sleep (completion_check_interval)
 				attempts := attempts + 1
-				command.poll
 			end
 			if not command.finished then
 				command.terminate
 				command.wait_for_exit
 			end
-			assert_true ("polled callback process finished", command.finished)
-			assert_integers_equal ("polled callback disabled", 1, callback_call_count)
-			assert_true ("polled callback failure recorded", command.has_failures)
+			assert_true ("autonomous callback process finished", command.finished)
+			assert_integers_equal ("autonomous callback disabled", 1, callback_call_count)
+			assert_true ("autonomous callback failure recorded", command.has_failures)
 		end
 
 	test_two_callback_failures_are_deterministic
@@ -600,6 +598,75 @@ feature -- Test
 			assert_true ("tree termination recorded", command.execution_result.was_terminated_by_client)
 		end
 
+	test_terminate_completes_without_wait
+			-- Let the autonomous supervisor finish after `terminate` returns.
+		local
+			command: OS_COMMAND
+			environment: EXECUTION_ENVIRONMENT
+			attempts: INTEGER
+		do
+			create command.make (process_child_executable, child_arguments ("sleep"))
+			command.start
+			command.terminate
+			create environment
+			from
+			until
+				command.finished or attempts = completion_attempt_limit
+			loop
+				environment.sleep (completion_check_interval)
+				attempts := attempts + 1
+			end
+			assert_true ("terminate completed autonomously", command.finished)
+			assert_true ("autonomous termination recorded", command.execution_result.was_terminated_by_client)
+		end
+
+	test_timeout_terminates_execution
+			-- Enforce an overall deadline without a client lifecycle call.
+		local
+			command: OS_COMMAND
+			process_result: OS_PROCESS_EXECUTION_RESULT
+		do
+			create command.make (process_child_executable, child_arguments ("sleep"))
+			command.set_timeout_milliseconds (50)
+			command.run
+			process_result := command.execution_result
+			assert_true ("timeout finished", command.finished)
+			assert_true ("timeout recorded", process_result.was_timed_out)
+			assert_false ("timeout is not client termination", process_result.was_terminated_by_client)
+			assert_false ("timeout unsuccessful", process_result.successful)
+		end
+
+	test_timeout_covers_descendant_pipe_lifetime
+			-- Expire even after the direct shell exits while a descendant holds its pipe.
+		local
+			command: OS_COMMAND
+			shell_text: STRING_32
+		do
+			if {PLATFORM}.is_windows then
+				create shell_text.make_from_string_general ("start %"%" /b ping -n 6 127.0.0.1 >NUL")
+			else
+				create shell_text.make_from_string_general ("sleep 5 &")
+			end
+			create command.make_shell (shell_text)
+			command.set_timeout_milliseconds (100)
+			command.run
+			assert_true ("descendant pipe timeout", command.execution_result.was_timed_out)
+			assert_true ("descendant timeout finished", command.finished)
+		end
+
+	test_clear_timeout
+			-- Restore unlimited execution for subsequent starts.
+		local
+			command: OS_COMMAND
+		do
+			create command.make (process_child_executable, child_arguments ("short-sleep"))
+			command.set_timeout_milliseconds (1)
+			command.clear_timeout
+			command.run
+			assert_true ("cleared timeout successful", command.execution_result.successful)
+			assert_false ("cleared timeout absent", command.execution_result.was_timed_out)
+		end
+
 	test_lifecycle_calls_are_serialized
 			-- Serialize concurrent wait and terminate calls on one command.
 		local
@@ -621,22 +688,24 @@ feature -- Test
 			assert_true ("concurrent lifecycle finished", command.finished)
 		end
 
-	test_finished_is_passive
-			-- Require polling or waiting to observe native completion.
+	test_finished_is_autonomous
+			-- Observe native completion without polling or waiting.
 		local
 			command: OS_COMMAND
 			environment: EXECUTION_ENVIRONMENT
+			attempts: INTEGER
 		do
 			create command.make (process_child_executable, child_arguments ("short-sleep"))
 			command.start
 			create environment
-			environment.sleep (200_000_000)
-			assert_false ("completion not observed implicitly", command.finished)
-			command.poll
-			if not command.finished then
-				command.wait_for_exit
+			from
+			until
+				command.finished or attempts = completion_attempt_limit
+			loop
+				environment.sleep (completion_check_interval)
+				attempts := attempts + 1
 			end
-			assert_true ("completion observed explicitly", command.finished)
+			assert_true ("completion observed autonomously", command.finished)
 		end
 
 	test_command_copies_inputs
@@ -805,8 +874,8 @@ feature -- Test
 			end
 		end
 
-	test_polled_result
-			-- Make the complete result available through polling alone.
+	test_autonomous_result
+			-- Make the complete result available without an explicit lifecycle call.
 		local
 			command: OS_COMMAND
 			environment: EXECUTION_ENVIRONMENT
@@ -816,22 +885,20 @@ feature -- Test
 			command.start
 			create environment
 			from
-				command.poll
 			until
-				command.finished or attempts = polling_attempt_limit
+				command.finished or attempts = completion_attempt_limit
 			loop
-				environment.sleep (polling_interval)
+				environment.sleep (completion_check_interval)
 				attempts := attempts + 1
-				command.poll
 			end
 			if command.finished then
-				assert_integers_equal ("polled exit", 0, command.execution_result.exit_code)
-				assert_readable_strings_equal ("polled stdout", "stdout-data", command.execution_result.stdout)
-				assert_readable_strings_equal ("polled stderr", "stderr-data", command.execution_result.stderr)
+				assert_integers_equal ("autonomous exit", 0, command.execution_result.exit_code)
+				assert_readable_strings_equal ("autonomous stdout", "stdout-data", command.execution_result.stdout)
+				assert_readable_strings_equal ("autonomous stderr", "stderr-data", command.execution_result.stderr)
 			else
 				command.terminate
 				command.wait_for_exit
-				assert_true ("polling completed", False)
+				assert_true ("autonomous completion", False)
 			end
 		end
 
@@ -1005,8 +1072,8 @@ feature {NONE} -- Constants
 
 	large_block_count: INTEGER = 128
 
-	polling_attempt_limit: INTEGER = 5_000
+	completion_attempt_limit: INTEGER = 5_000
 
-	polling_interval: INTEGER_64 = 1_000_000
+	completion_check_interval: INTEGER_64 = 1_000_000
 
 end

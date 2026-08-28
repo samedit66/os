@@ -20,7 +20,7 @@ create {OS_COMMAND}
 
 feature {NONE} -- Initialization
 
-	make (a_executable: READABLE_STRING_GENERAL; a_arguments: ITERABLE [READABLE_STRING_GENERAL]; a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_working_directory: detachable READABLE_STRING_GENERAL; a_input: READABLE_STRING_8; a_environment: ITERABLE [READABLE_STRING_GENERAL]; a_stdin_mode, a_stdout_mode, a_stderr_mode: INTEGER)
+	make (a_executable: READABLE_STRING_GENERAL; a_arguments: ITERABLE [READABLE_STRING_GENERAL]; a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_working_directory: detachable READABLE_STRING_GENERAL; a_input: READABLE_STRING_8; a_environment: ITERABLE [READABLE_STRING_GENERAL]; a_stdin_mode, a_stdout_mode, a_stderr_mode, a_timeout_milliseconds: INTEGER; a_allow_terminal_stdin: BOOLEAN)
 			-- Launch the native process and its Eiffel pipe workers with `a_environment`.
 			-- Environment entries are encoded as UTF-8 on Unix. On Windows the
 			-- native bridge converts them to a sorted UTF-16 environment block.
@@ -28,13 +28,15 @@ feature {NONE} -- Initialization
 			valid_stdin_mode: a_stdin_mode = stdin_pipe_mode or else a_stdin_mode = stdin_inherit_mode
 			valid_stdout_mode: a_stdout_mode >= output_capture_mode and then a_stdout_mode <= output_discard_mode
 			valid_stderr_mode: a_stderr_mode >= output_capture_mode and then a_stderr_mode <= stderr_merge_mode
+			valid_timeout: a_timeout_milliseconds >= 0
 		do
 			initialize_state
 			stdout_was_captured := a_stdout_mode = output_capture_mode
 			stderr_was_captured := a_stderr_mode = output_capture_mode
 			stderr_was_merged := a_stderr_mode = stderr_merge_mode
 			stdin_was_piped := a_stdin_mode = stdin_pipe_mode
-			launch_process (a_executable, a_arguments, a_stdout, a_stderr, a_working_directory, a_input, a_environment, a_stdin_mode, a_stdout_mode, a_stderr_mode)
+			timeout_milliseconds := a_timeout_milliseconds
+			launch_process (a_executable, a_arguments, a_stdout, a_stderr, a_working_directory, a_input, a_environment, a_stdin_mode, a_stdout_mode, a_stderr_mode, a_allow_terminal_stdin)
 		ensure
 			launch_failure_is_terminal: not was_launched implies is_finished
 		end
@@ -63,13 +65,15 @@ feature {NONE} -- Initialization
 			-- Establish empty lifecycle and result storage before launch.
 		do
 			create lifecycle_mutex.make
+			create wait_mutex.make
 			create state_mutex.make
 			create failure_storage.make (4)
 			create stdout_snapshot.make_empty
 			create stderr_snapshot.make_empty
+			create supervisor.make (agent supervise)
 		end
 
-	launch_process (a_executable: READABLE_STRING_GENERAL; a_arguments: ITERABLE [READABLE_STRING_GENERAL]; a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_working_directory: detachable READABLE_STRING_GENERAL; a_input: READABLE_STRING_8; a_environment: ITERABLE [READABLE_STRING_GENERAL]; a_stdin_mode, a_stdout_mode, a_stderr_mode: INTEGER)
+	launch_process (a_executable: READABLE_STRING_GENERAL; a_arguments: ITERABLE [READABLE_STRING_GENERAL]; a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_working_directory: detachable READABLE_STRING_GENERAL; a_input: READABLE_STRING_8; a_environment: ITERABLE [READABLE_STRING_GENERAL]; a_stdin_mode, a_stdout_mode, a_stderr_mode: INTEGER; a_allow_terminal_stdin: BOOLEAN)
 			-- Launch after all recovery state has been initialized.
 		local
 			executable_c: C_STRING
@@ -85,6 +89,7 @@ feature {NONE} -- Initialization
 			working_directory_pointer: POINTER
 			offset: INTEGER
 			launch_error: INTEGER
+			terminal_stdin_flag: INTEGER
 		do
 			create executable_c.make (utf_8 (a_executable))
 			create argument_strings.make (8)
@@ -130,7 +135,10 @@ feature {NONE} -- Initialization
 				working_directory_pointer := working_directory_c.item
 			end
 			create error_area.make ({PLATFORM}.integer_32_bytes)
-			native_handle := c_start (executable_c.item, argument_vector.item, environment_vector.item, working_directory_pointer, a_stdin_mode, a_stdout_mode, a_stderr_mode, error_area.item)
+			if a_allow_terminal_stdin then
+				terminal_stdin_flag := 1
+			end
+			native_handle := c_start (executable_c.item, argument_vector.item, environment_vector.item, working_directory_pointer, a_stdin_mode, a_stdout_mode, a_stderr_mode, terminal_stdin_flag, error_area.item)
 			if native_handle = default_pointer then
 				launch_error := error_area.read_integer_32 (0)
 				record_native_failure (new_launch_kind, "launch", "Cannot start process", launch_error)
@@ -170,6 +178,14 @@ feature {NONE} -- Initialization
 				end
 				if has_worker_initialization_failure then
 					rollback_initialization
+				else
+					supervisor.launch
+					if supervisor.is_last_launch_successful then
+						supervisor_launched := True
+					else
+						record_worker_initialization_failure ("initialize process supervisor")
+						rollback_initialization
+					end
 				end
 			end
 		rescue
@@ -224,49 +240,23 @@ feature {OS_COMMAND} -- Status report
 
 feature {OS_COMMAND} -- Basic operations
 
-	poll
-			-- Check for completion without waiting.
-		local
-			mutex_locked: BOOLEAN
-		do
-			lifecycle_mutex.lock
-			mutex_locked := True
-			if not is_finished then
-				poll_process
-				if process_exited and then io_finished then
-					join_workers
-					complete
-				end
-			end
-			lifecycle_mutex.unlock
-			mutex_locked := False
-		ensure
-			finished_is_stable: old is_finished implies is_finished
-		rescue
-			if mutex_locked then
-				lifecycle_mutex.unlock
-			end
-		end
-
 	wait
-			-- Wait for child completion, I/O workers, and result publication.
+			-- Synchronize with autonomous supervision and result publication.
 		local
 			mutex_locked: BOOLEAN
 		do
-			lifecycle_mutex.lock
+			wait_mutex.lock
 			mutex_locked := True
-			if not is_finished then
-				wait_for_process
-				join_workers
-				complete
+			if supervisor_launched then
+				supervisor.join
 			end
-			lifecycle_mutex.unlock
+			wait_mutex.unlock
 			mutex_locked := False
 		ensure
 			finished: is_finished
 		rescue
 			if mutex_locked then
-				lifecycle_mutex.unlock
+				wait_mutex.unlock
 			end
 		end
 
@@ -278,18 +268,12 @@ feature {OS_COMMAND} -- Basic operations
 		do
 			lifecycle_mutex.lock
 			mutex_locked := True
-			if not is_finished then
-				poll_process
-				if process_exited and then io_finished then
-					join_workers
-					complete
-				elseif native_handle /= default_pointer then
-					status := c_terminate (native_handle)
-					if status /= 0 then
-						record_native_failure (new_termination_kind, "terminate", "Cannot terminate process", status)
-					else
-						was_terminated_by_client := True
-					end
+			if not is_finished and then native_handle /= default_pointer and then not was_timed_out then
+				status := c_terminate (native_handle)
+				if status /= 0 then
+					record_native_failure (new_termination_kind, "terminate", "Cannot terminate process", status)
+				else
+					was_terminated_by_client := True
 				end
 			end
 			lifecycle_mutex.unlock
@@ -301,6 +285,27 @@ feature {OS_COMMAND} -- Basic operations
 		end
 
 feature {NONE} -- Completion
+
+	supervise
+			-- Own native waiting, worker completion, cleanup, and result publication.
+			-- Callback workers are joined here. Client callbacks supplied to
+			-- `start_streaming` must therefore return for completion to progress.
+		do
+			wait_for_process
+			if timeout_milliseconds > 0 and then not has_termination_reason then
+				wait_for_io_until_deadline
+			end
+			if has_termination_reason then
+				drain_io_after_termination
+			elseif timeout_milliseconds = 0 then
+				wait_for_io
+				if has_termination_reason then
+					drain_io_after_termination
+				end
+			end
+			join_workers
+			complete
+		end
 
 	rollback_initialization
 			-- Restore safe ownership after an I/O worker failed to start.
@@ -333,35 +338,25 @@ feature {NONE} -- Completion
 			end
 		end
 
-	poll_process
-			-- Poll the child and retain its status when it has exited.
-		local
-			finished_area: MANAGED_POINTER
-			exit_area: MANAGED_POINTER
-			status: INTEGER
-		do
-			if not process_exited and then native_handle /= default_pointer then
-				create finished_area.make ({PLATFORM}.integer_32_bytes)
-				create exit_area.make ({PLATFORM}.integer_32_bytes)
-				status := c_poll (native_handle, finished_area.item, exit_area.item)
-				if status /= 0 then
-					record_native_failure (new_poll_kind, "poll", "Cannot poll process", status)
-				elseif finished_area.read_integer_32 (0) /= 0 then
-					exit_status := exit_area.read_integer_32 (0)
-					process_exited := True
-				end
-			end
-		end
-
 	wait_for_process
 			-- Wait for the child, recovering ownership after a native wait failure.
 		local
 			exit_area: MANAGED_POINTER
+			timed_out_area: MANAGED_POINTER
 			status: INTEGER
 		do
 			if not process_exited then
 				create exit_area.make ({PLATFORM}.integer_32_bytes)
-				status := c_wait (native_handle, exit_area.item)
+				if timeout_milliseconds > 0 then
+					create timed_out_area.make ({PLATFORM}.integer_32_bytes)
+					status := c_wait_for (native_handle, timeout_milliseconds, timed_out_area.item, exit_area.item)
+					if status = 0 and then timed_out_area.read_integer_32 (0) /= 0 then
+						terminate_after_timeout
+						status := c_wait (native_handle, exit_area.item)
+					end
+				else
+					status := c_wait (native_handle, exit_area.item)
+				end
 				if status /= 0 then
 					record_native_failure (new_wait_kind, "wait", "Cannot wait for process", status)
 					recover_after_wait_failure (exit_area)
@@ -372,6 +367,90 @@ feature {NONE} -- Completion
 			end
 		ensure
 			process_exited: process_exited
+		end
+
+	wait_for_io_until_deadline
+			-- Allow pipe workers to finish only within the overall execution deadline.
+		local
+			environment: EXECUTION_ENVIRONMENT
+			remaining: INTEGER
+		do
+			create environment
+			from
+				remaining := c_timeout_remaining (native_handle, timeout_milliseconds)
+			until
+				io_finished or else remaining = 0 or else has_termination_reason
+			loop
+				environment.sleep (io_check_interval_nanoseconds)
+				remaining := c_timeout_remaining (native_handle, timeout_milliseconds)
+			end
+			if not io_finished and then not has_termination_reason then
+				terminate_after_timeout
+			end
+		end
+
+	wait_for_io
+			-- Wait for natural EOF before joining workers from the supervisor thread.
+		local
+			environment: EXECUTION_ENVIRONMENT
+		do
+			create environment
+			from
+			until
+				io_finished or else has_termination_reason
+			loop
+				environment.sleep (io_check_interval_nanoseconds)
+			end
+		end
+
+	terminate_after_timeout
+			-- Record the expired deadline and force the managed process tree down.
+		local
+			status: INTEGER
+		do
+			lifecycle_mutex.lock
+			if not was_terminated_by_client and then not was_timed_out then
+				was_timed_out := True
+				if native_handle /= default_pointer then
+					status := c_terminate (native_handle)
+					if status /= 0 then
+						record_native_failure (new_termination_kind, "terminate after timeout", "Cannot terminate timed-out process tree", status)
+					end
+				end
+			end
+			lifecycle_mutex.unlock
+		end
+
+	has_termination_reason: BOOLEAN
+			-- Has client termination or the deadline initiated shutdown?
+		do
+			lifecycle_mutex.lock
+			Result := was_terminated_by_client or else was_timed_out
+			lifecycle_mutex.unlock
+		end
+
+	drain_io_after_termination
+			-- Give killed descendants a bounded interval to close inherited pipes.
+		local
+			environment: EXECUTION_ENVIRONMENT
+			attempts: INTEGER
+		do
+			create environment
+			from
+			until
+				io_finished or else attempts = post_termination_drain_attempts
+			loop
+				environment.sleep (io_check_interval_nanoseconds)
+				attempts := attempts + 1
+			end
+			if not io_finished then
+				output_was_cut_off := (stdout_reader_launched and then attached stdout_reader as out_reader and then not out_reader.is_finished) or else (stderr_reader_launched and then attached stderr_reader as err_reader and then not err_reader.is_finished)
+				lifecycle_mutex.lock
+				if native_handle /= default_pointer then
+					c_cancel_io (native_handle)
+				end
+				lifecycle_mutex.unlock
+			end
 		end
 
 	recover_after_wait_failure (a_exit_area: MANAGED_POINTER)
@@ -404,25 +483,35 @@ feature {NONE} -- Completion
 		do
 			if stdout_reader_launched and then attached stdout_reader as out_reader then
 				out_reader.join
+				stdout_reader_joined := True
 			end
 			if stderr_reader_launched and then attached stderr_reader as err_reader then
 				err_reader.join
+				stderr_reader_joined := True
 			end
 			if stdin_writer_launched and then attached stdin_writer as in_writer then
 				in_writer.join
+				stdin_writer_joined := True
 			end
 		ensure
-			finished: io_finished
+			joined: io_workers_joined
+		end
+
+	io_workers_joined: BOOLEAN
+			-- Have all launched standard-I/O workers been joined?
+		do
+			Result := (not stdout_reader_launched or else stdout_reader_joined) and then (not stderr_reader_launched or else stderr_reader_joined) and then (not stdin_writer_launched or else stdin_writer_joined)
 		end
 
 	complete
 			-- Publish the sole terminal result and release the native handle.
 		require
 			process_exited: process_exited
-			io_finished: io_finished
+			io_workers_joined: io_workers_joined
 		local
 			result_failures: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
 			completed_result: OS_PROCESS_EXECUTION_RESULT
+			status: INTEGER
 		do
 			if not is_finished then
 				if attached stdout_reader as out_reader then
@@ -431,12 +520,18 @@ feature {NONE} -- Completion
 				if attached stderr_reader as err_reader then
 					stderr_snapshot := err_reader.output.to_string_8
 				end
+				lifecycle_mutex.lock
 				if native_handle /= default_pointer then
+					status := c_restore_terminal (native_handle)
+					if status /= 0 then
+						record_native_failure (new_wait_kind, "restore terminal", "Cannot restore the parent terminal foreground process group", status)
+					end
 					c_free (native_handle)
 					native_handle := default_pointer
 				end
+				lifecycle_mutex.unlock
 				result_failures := failure_snapshot
-				create completed_result.make (was_launched, was_launched and process_exited, exit_status, stdout_was_captured, stderr_was_captured, stderr_was_merged, was_terminated_by_client, False, False, stdout_snapshot, stderr_snapshot, result_failures)
+				create completed_result.make (was_launched, was_launched and process_exited, exit_status, stdout_was_captured, stderr_was_captured, stderr_was_merged, was_terminated_by_client, was_timed_out, output_was_cut_off, stdout_snapshot, stderr_snapshot, result_failures)
 				state_mutex.lock
 				process_execution_result := completed_result
 				finished := True
@@ -568,24 +663,22 @@ feature {NONE} -- Failures
 				Result := 1
 			elseif a_kind.is_worker_initialization then
 				Result := 2
-			elseif a_kind.is_poll then
-				Result := 3
 			elseif a_kind.is_termination then
-				Result := 4
+				Result := 3
 			elseif a_kind.is_wait then
-				Result := 5
+				Result := 4
 			elseif a_kind.is_stdin_write then
-				Result := 6
+				Result := 5
 			elseif a_kind.is_stdin_close then
-				Result := 7
+				Result := 6
 			elseif a_kind.is_stdout_read then
-				Result := 8
+				Result := 7
 			elseif a_kind.is_stdout_handler then
-				Result := 9
+				Result := 8
 			elseif a_kind.is_stderr_read then
-				Result := 10
+				Result := 9
 			else
-				Result := 11
+				Result := 10
 			end
 		ensure
 			valid_rank: Result >= 1 and Result <= failure_category_count
@@ -601,11 +694,6 @@ feature {NONE} -- Failure-kind factories
 	new_stdin_close_kind: OS_PROCESS_FAILURE_KIND
 		do
 			create Result.make_stdin_close
-		end
-
-	new_poll_kind: OS_PROCESS_FAILURE_KIND
-		do
-			create Result.make_poll
 		end
 
 	new_wait_kind: OS_PROCESS_FAILURE_KIND
@@ -647,18 +735,11 @@ feature {NONE} -- Exceptional invariant recovery
 
 feature {NONE} -- Native bridge
 
-	c_start (a_executable, a_arguments, a_environment, a_working_directory: POINTER; a_stdin_mode, a_stdout_mode, a_stderr_mode: INTEGER; a_error: POINTER): POINTER
+	c_start (a_executable, a_arguments, a_environment, a_working_directory: POINTER; a_stdin_mode, a_stdout_mode, a_stderr_mode, a_allow_terminal_stdin: INTEGER; a_error: POINTER): POINTER
 		external
 			"C use <subprocess.h>"
 		alias
 			"os_process_start"
-		end
-
-	c_poll (a_process, a_finished, a_exit_code: POINTER): INTEGER
-		external
-			"C use <subprocess.h>"
-		alias
-			"os_process_poll"
 		end
 
 	c_wait (a_process, a_exit_code: POINTER): INTEGER
@@ -666,6 +747,27 @@ feature {NONE} -- Native bridge
 			"C blocking use <subprocess.h>"
 		alias
 			"os_process_wait"
+		end
+
+	c_wait_for (a_process: POINTER; a_timeout_milliseconds: INTEGER; a_timed_out, a_exit_code: POINTER): INTEGER
+		external
+			"C blocking use <subprocess.h>"
+		alias
+			"os_process_wait_for"
+		end
+
+	c_timeout_remaining (a_process: POINTER; a_timeout_milliseconds: INTEGER): INTEGER
+		external
+			"C use <subprocess.h>"
+		alias
+			"os_process_timeout_remaining"
+		end
+
+	c_restore_terminal (a_process: POINTER): INTEGER
+		external
+			"C use <subprocess.h>"
+		alias
+			"os_process_restore_terminal"
 		end
 
 	c_terminate (a_process: POINTER): INTEGER
@@ -687,6 +789,13 @@ feature {NONE} -- Native bridge
 			"C use <subprocess.h>"
 		alias
 			"os_process_close_stdin"
+		end
+
+	c_cancel_io (a_process: POINTER)
+		external
+			"C use <subprocess.h>"
+		alias
+			"os_process_cancel_io"
 		end
 
 	c_free (a_process: POINTER)
@@ -712,6 +821,12 @@ feature {NONE} -- Implementation
 
 	stdin_writer_launched: BOOLEAN
 
+	stdout_reader_joined: BOOLEAN
+
+	stderr_reader_joined: BOOLEAN
+
+	stdin_writer_joined: BOOLEAN
+
 	stdout_snapshot: STRING_8
 
 	stderr_snapshot: STRING_8
@@ -725,6 +840,12 @@ feature {NONE} -- Implementation
 	stderr_was_merged: BOOLEAN
 
 	was_terminated_by_client: BOOLEAN
+
+	was_timed_out: BOOLEAN
+
+	output_was_cut_off: BOOLEAN
+
+	timeout_milliseconds: INTEGER
 
 	stdin_pipe_mode: INTEGER = 0
 	stdin_inherit_mode: INTEGER = 1
@@ -740,7 +861,14 @@ feature {NONE} -- Implementation
 
 	lifecycle_mutex: MUTEX
 
+	wait_mutex: MUTEX
+			-- Serialize clients joining the sole supervisor thread.
+
 	state_mutex: MUTEX
+
+	supervisor: WORKER_THREAD
+
+	supervisor_launched: BOOLEAN
 
 	was_launched: BOOLEAN
 
@@ -750,7 +878,12 @@ feature {NONE} -- Implementation
 
 	finished: BOOLEAN
 
-	failure_category_count: INTEGER = 11
+	failure_category_count: INTEGER = 10
+
+	io_check_interval_nanoseconds: INTEGER_64 = 10_000_000
+
+	post_termination_drain_attempts: INTEGER = 100
+			-- Ten-millisecond checks give terminated pipes one second to reach EOF.
 
 invariant
 

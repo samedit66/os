@@ -3,6 +3,7 @@
 /EIFGENs/
 /build/
 /os_process_example
+/os_quick_start
 /os_process_tests
 /os_file_path_tests
 /os_process_test_child
@@ -14,4 +15,3 @@
 *.obj
 *.lib
 *.a
-/docs/formatter-defects.md

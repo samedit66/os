@@ -21,7 +21,7 @@ PROJECT_ROOT := $(abspath .)
 GOBO_FLAGS = --variable=GOBO_EIFFEL=ge --ise=25.12 --gelint
 ISE_TEST_FLAGS ?= -clean
 ISE_TEST_CODE_DIR ?= W_code
-EIFFEL_TARGETS ?= file_path.ecf@os_file_path process.ecf@os_process os.ecf@application
+EIFFEL_TARGETS ?= file_path.ecf@os_file_path process.ecf@os_process examples/quick_start/quick_start.ecf@quick_start
 EIFFEL_FORMAT_SOURCES ?= $(shell git ls-files '*.e')
 EIFFEL_FORMAT_EXCLUDES ?= tests/file_path/os_file_path_tests.e
 C_FORMAT_SOURCES ?= $(wildcard c/*.c c/*.h)
@@ -90,12 +90,12 @@ cformat:
 	$(CLANG_FORMAT) -i $(C_FORMAT_SOURCES)
 
 gobo: native
-	GOBO_EIFFEL=ge ZIG_GLOBAL_CACHE_DIR=$(PROJECT_ROOT)/build/zig-global-cache ZIG_LOCAL_CACHE_DIR=$(PROJECT_ROOT)/build/zig-local-cache $(GEC) $(GOBO_FLAGS) --target=application os.ecf
-	./os_process_example
+	GOBO_EIFFEL=ge ZIG_GLOBAL_CACHE_DIR=$(PROJECT_ROOT)/build/zig-global-cache ZIG_LOCAL_CACHE_DIR=$(PROJECT_ROOT)/build/zig-local-cache $(GEC) $(GOBO_FLAGS) --target=quick_start examples/quick_start/quick_start.ecf
+	./os_quick_start
 
 ise: native
-	GOBO_EIFFEL=ise $(EC) -batch -clean -config os.ecf -target application -c_compile
-	./EIFGENs/application/W_code/os_process_example
+	GOBO_EIFFEL=ise $(EC) -batch -clean -config examples/quick_start/quick_start.ecf -target quick_start -c_compile
+	./EIFGENs/quick_start/W_code/os_quick_start
 
 test: test-gobo test-ise
 
@@ -146,4 +146,4 @@ test-ise-finalized:
 	$(MAKE) test-ise ISE_TEST_FLAGS="-clean -finalize -keep" ISE_TEST_CODE_DIR=F_code
 
 clean:
-	rm -rf build EIFGENs os_process_example os_process_tests os_file_path_tests os_process_test_child os_tests
+	rm -rf build EIFGENs os_process_example os_quick_start os_process_tests os_file_path_tests os_process_test_child os_tests

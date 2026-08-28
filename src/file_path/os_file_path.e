@@ -17,7 +17,7 @@ note
         do
             create file.make ("message.txt")
             file.write_text ("Hello from Eiffel%N")
-            io.put_string (file.text)
+            io.put_string_32 (file.text)
         end
         ```
     ]"

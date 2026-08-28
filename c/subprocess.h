@@ -60,8 +60,8 @@ extern "C"
      * Lifecycle calls return zero on success or a positive platform error code.
      * Poll and wait retain the exit code, so either may be repeated after reaping
      * the child. Lifecycle calls must be serialized with one another. Terminate
-     * only requests platform-dependent termination; the caller must still poll or
-     * wait. Exit-code interpretation is platform-specific.
+     * forcefully kills the managed process group or Job Object; the caller must
+     * still poll or wait. Exit-code interpretation is platform-specific.
      */
     int os_process_poll(os_process *process, int *finished, int *exit_code);
     int os_process_wait(os_process *process, int *exit_code);

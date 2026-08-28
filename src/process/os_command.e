@@ -393,7 +393,9 @@ feature -- Execution
 		end
 
 	terminate
-			-- Request platform-dependent termination of the current child.
+			-- Force termination of the current managed process tree.
+			-- POSIX descendants that deliberately escape the launch process group
+			-- with setsid/setpgid are outside this containment guarantee.
 		require
 			started: has_started
 		local

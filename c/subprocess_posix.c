@@ -111,7 +111,9 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     int stdout_pipe[2] = {-1, -1};
     int stderr_pipe[2] = {-1, -1};
     posix_spawn_file_actions_t actions;
+    posix_spawnattr_t attributes;
     int actions_initialized = 0;
+    int attributes_initialized = 0;
     int result = EINVAL;
     pid_t pid;
     os_process *process = NULL;
@@ -177,6 +179,16 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     if (result != 0)
         goto fail;
     actions_initialized = 1;
+    result = posix_spawnattr_init(&attributes);
+    if (result != 0)
+        goto fail;
+    attributes_initialized = 1;
+    result = posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
+    if (result != 0)
+        goto fail;
+    result = posix_spawnattr_setpgroup(&attributes, 0);
+    if (result != 0)
+        goto fail;
 #define ADD_ACTION(call)                                                                           \
     do                                                                                             \
     {                                                                                              \
@@ -226,11 +238,16 @@ os_process *os_process_start(const char *executable, char *const arguments[],
 
     /* OS_COMMAND resolves executable against its own PATH. Use posix_spawn,
        not posix_spawnp, so Unix cannot search the parent process environment. */
-    result = posix_spawn(&pid, executable, &actions, NULL, arguments, environment);
+    /* Every launch starts a new process group. Public termination targets this
+       group so descendants inheriting the group are killed together. A child
+       that deliberately escapes with setsid/setpgid is outside this guarantee. */
+    result = posix_spawn(&pid, executable, &actions, &attributes, arguments, environment);
     if (result != 0)
         goto fail;
     (void)posix_spawn_file_actions_destroy(&actions);
     actions_initialized = 0;
+    (void)posix_spawnattr_destroy(&attributes);
+    attributes_initialized = 0;
     close_fd(&stdin_pipe[0]);
     close_fd(&stdout_pipe[1]);
     close_fd(&stderr_pipe[1]);
@@ -239,7 +256,7 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     if (process == NULL)
     {
         result = ENOMEM;
-        (void)kill(pid, SIGKILL);
+        (void)kill(-pid, SIGKILL);
         while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
         {
         }
@@ -262,6 +279,10 @@ fail:
     if (actions_initialized)
     {
         (void)posix_spawn_file_actions_destroy(&actions);
+    }
+    if (attributes_initialized)
+    {
+        (void)posix_spawnattr_destroy(&attributes);
     }
     close_fd(&stdin_pipe[0]);
     close_fd(&stdin_pipe[1]);
@@ -412,20 +433,22 @@ int os_process_wait(os_process *process, int *exit_code)
 
 int os_process_terminate(os_process *process)
 {
+    int result;
     if (process == NULL)
         return EINVAL;
-    if (process->has_exited)
-        return 0;
-    return kill(process->pid, SIGTERM) == 0 ? 0 : errno;
+    /* SIGKILL gives terminate one deterministic meaning and prevents a direct
+       child from handling a softer signal while leaving descendants alive. */
+    result = kill(-process->pid, SIGKILL);
+    return result == 0 || errno == ESRCH ? 0 : errno;
 }
 
 int os_process_force_terminate(os_process *process)
 {
+    int result;
     if (process == NULL)
         return EINVAL;
-    if (process->has_exited)
-        return 0;
-    return kill(process->pid, SIGKILL) == 0 ? 0 : errno;
+    result = kill(-process->pid, SIGKILL);
+    return result == 0 || errno == ESRCH ? 0 : errno;
 }
 
 void os_process_free(os_process *process)

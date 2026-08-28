@@ -562,6 +562,42 @@ feature -- Test
 			command.terminate
 			command.wait_for_exit
 			assert_true ("termination finished", command.finished)
+			assert_true ("termination recorded", command.execution_result.was_terminated_by_client)
+			assert_false ("terminated execution unsuccessful", command.execution_result.successful)
+		end
+
+	test_termination_kills_process_tree
+			-- Kill a shell and the child that would otherwise create a delayed marker.
+		local
+			command: OS_COMMAND
+			environment: EXECUTION_ENVIRONMENT
+			marker_path: PATH
+			marker: PLAIN_TEXT_FILE
+			shell_text: STRING_32
+		do
+			create_directory (current_test_root)
+			marker_path := current_test_root.extended ("descendant-survived")
+			create shell_text.make_empty
+			if {PLATFORM}.is_windows then
+				shell_text.append ("ping -n 3 127.0.0.1 >NUL & echo survivor > %"")
+				shell_text.append (marker_path.name)
+				shell_text.append_character ('%"')
+			else
+				shell_text.append ("sleep 2; printf survivor > '")
+				shell_text.append (marker_path.name)
+				shell_text.append_character ('%'')
+			end
+			create command.make_shell (shell_text)
+			command.start
+			create environment
+			environment.sleep (200_000_000)
+			command.terminate
+			command.terminate
+			command.wait_for_exit
+			environment.sleep (2_500_000_000)
+			create marker.make_with_path (marker_path)
+			assert_false ("descendant did not survive termination", marker.exists)
+			assert_true ("tree termination recorded", command.execution_result.was_terminated_by_client)
 		end
 
 	test_lifecycle_calls_are_serialized

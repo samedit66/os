@@ -271,7 +271,7 @@ feature {OS_COMMAND} -- Basic operations
 		end
 
 	terminate
-			-- Request platform-dependent child termination.
+			-- Force termination of the managed process tree.
 		local
 			status: INTEGER
 			mutex_locked: BOOLEAN
@@ -280,15 +280,15 @@ feature {OS_COMMAND} -- Basic operations
 			mutex_locked := True
 			if not is_finished then
 				poll_process
-				if process_exited then
-					if io_finished then
-						join_workers
-						complete
-					end
+				if process_exited and then io_finished then
+					join_workers
+					complete
 				elseif native_handle /= default_pointer then
 					status := c_terminate (native_handle)
 					if status /= 0 then
 						record_native_failure (new_termination_kind, "terminate", "Cannot terminate process", status)
+					else
+						was_terminated_by_client := True
 					end
 				end
 			end
@@ -436,7 +436,7 @@ feature {NONE} -- Completion
 					native_handle := default_pointer
 				end
 				result_failures := failure_snapshot
-				create completed_result.make (was_launched, was_launched and process_exited, exit_status, stdout_was_captured, stderr_was_captured, stderr_was_merged, False, False, False, stdout_snapshot, stderr_snapshot, result_failures)
+				create completed_result.make (was_launched, was_launched and process_exited, exit_status, stdout_was_captured, stderr_was_captured, stderr_was_merged, was_terminated_by_client, False, False, stdout_snapshot, stderr_snapshot, result_failures)
 				state_mutex.lock
 				process_execution_result := completed_result
 				finished := True
@@ -723,6 +723,8 @@ feature {NONE} -- Implementation
 	stderr_was_captured: BOOLEAN
 
 	stderr_was_merged: BOOLEAN
+
+	was_terminated_by_client: BOOLEAN
 
 	stdin_pipe_mode: INTEGER = 0
 	stdin_inherit_mode: INTEGER = 1

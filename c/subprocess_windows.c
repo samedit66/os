@@ -17,6 +17,7 @@
 struct os_process
 {
     HANDLE process;
+    HANDLE job;
     HANDLE stdin_write;
     HANDLE stdout_read;
     HANDLE stderr_read;
@@ -309,8 +310,10 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     HANDLE child_stdin = NULL, child_stdout = NULL, child_stderr = NULL;
     STARTUPINFOEXW startup = {0};
     PROCESS_INFORMATION information = {0};
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_limits = {0};
     SIZE_T attributes_size = 0;
     HANDLE inherited[3];
+    HANDLE job = NULL;
     SIZE_T inherited_count = 0;
     wchar_t *command_line = NULL;
     wchar_t *application_name = NULL;
@@ -347,6 +350,21 @@ os_process *os_process_start(const char *executable, char *const arguments[],
         working_directory_wide = utf8_to_wide(working_directory, error_code);
         if (working_directory_wide == NULL)
             goto fail;
+    }
+    job = CreateJobObjectW(NULL, NULL);
+    if (job == NULL)
+    {
+        windows_error = GetLastError();
+        goto fail;
+    }
+    /* Closing the last library-owned Job Object handle is a containment safety
+       net. Normal termination also targets the job explicitly. */
+    job_limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &job_limits,
+                                 sizeof(job_limits)))
+    {
+        windows_error = GetLastError();
+        goto fail;
     }
     if (stdin_mode == OS_PROCESS_STDIN_PIPE)
     {
@@ -451,11 +469,36 @@ os_process *os_process_start(const char *executable, char *const arguments[],
        lpEnvironment. OS_COMMAND has already resolved application_name so the
        child environment and executable lookup use the same snapshot. */
     if (!CreateProcessW(application_name, command_line, NULL, NULL, TRUE,
-                        EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
+                        EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT |
+                            CREATE_SUSPENDED,
                         environment_block, working_directory_wide,
                         &startup.StartupInfo, &information))
     {
         windows_error = GetLastError();
+        goto fail;
+    }
+    /* Suspension closes the race in which the new process could create an
+       uncontained descendant before assignment to the job. */
+    if (!AssignProcessToJobObject(job, information.hProcess))
+    {
+        windows_error = GetLastError();
+        (void)TerminateProcess(information.hProcess, 1);
+        (void)WaitForSingleObject(information.hProcess, INFINITE);
+        (void)CloseHandle(information.hThread);
+        (void)CloseHandle(information.hProcess);
+        information.hThread = NULL;
+        information.hProcess = NULL;
+        goto fail;
+    }
+    if (ResumeThread(information.hThread) == (DWORD)-1)
+    {
+        windows_error = GetLastError();
+        (void)TerminateJobObject(job, 1);
+        (void)WaitForSingleObject(information.hProcess, INFINITE);
+        (void)CloseHandle(information.hThread);
+        (void)CloseHandle(information.hProcess);
+        information.hThread = NULL;
+        information.hProcess = NULL;
         goto fail;
     }
     (void)CloseHandle(information.hThread);
@@ -471,13 +514,14 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     process = (os_process *)calloc(1, sizeof(*process));
     if (process == NULL)
     {
-        (void)TerminateProcess(information.hProcess, 1);
+        (void)TerminateJobObject(job, 1);
         (void)WaitForSingleObject(information.hProcess, INFINITE);
         (void)CloseHandle(information.hProcess);
         windows_error = ERROR_NOT_ENOUGH_MEMORY;
         goto fail;
     }
     process->process = information.hProcess;
+    process->job = job;
     process->stdin_write = stdin_write;
     process->stdout_read = stdout_read;
     process->stderr_read = stderr_read;
@@ -485,6 +529,7 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     stdin_write = NULL;
     stdout_read = NULL;
     stderr_read = NULL;
+    job = NULL;
 
 fail:
     if (startup.lpAttributeList != NULL)
@@ -505,6 +550,7 @@ fail:
         close_handle(&child_stderr);
     close_handle(&child_stdout);
     close_handle(&child_stdin);
+    close_handle(&job);
     if (process == NULL && windows_error != ERROR_SUCCESS)
     {
         *error_code = error_as_int(windows_error);
@@ -623,18 +669,14 @@ int os_process_terminate(os_process *process)
 {
     if (process == NULL)
         return ERROR_INVALID_PARAMETER;
-    if (process->has_exited)
-        return 0;
-    return TerminateProcess(process->process, 1) ? 0 : error_as_int(GetLastError());
+    return TerminateJobObject(process->job, 1) ? 0 : error_as_int(GetLastError());
 }
 
 int os_process_force_terminate(os_process *process)
 {
     if (process == NULL)
         return ERROR_INVALID_PARAMETER;
-    if (process->has_exited)
-        return 0;
-    return TerminateProcess(process->process, 1) ? 0 : error_as_int(GetLastError());
+    return TerminateJobObject(process->job, 1) ? 0 : error_as_int(GetLastError());
 }
 
 void os_process_free(os_process *process)
@@ -645,6 +687,7 @@ void os_process_free(os_process *process)
         close_handle(&process->stdout_read);
         close_handle(&process->stderr_read);
         close_handle(&process->process);
+        close_handle(&process->job);
         free(process);
     }
 }

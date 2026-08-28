@@ -2,7 +2,7 @@ note
 
 	description:
 
-		"Test worker that invokes one command lifecycle operation."
+		"Test worker that invokes one command lifecycle or configuration operation."
 
 	author: "samedit66 <samedit66@yandex.ru>"
 	library: "os"
@@ -20,7 +20,8 @@ create
 
 	make_poll,
 	make_wait,
-	make_terminate
+	make_terminate,
+	make_set_environment
 
 feature {NONE} -- Initialization
 
@@ -48,6 +49,14 @@ feature {NONE} -- Initialization
 			make_thread
 		end
 
+	make_set_environment (a_command: OS_COMMAND)
+			-- Prepare one forbidden environment change on active `a_command`.
+		do
+			command := a_command
+			operation := set_environment_operation
+			make_thread
+		end
+
 feature -- Status report
 
 	successful: BOOLEAN
@@ -67,8 +76,10 @@ feature {NONE} -- Execution
 					command.poll
 				elseif operation = wait_operation then
 					command.wait_for_exit
-				else
+				elseif operation = terminate_operation then
 					command.terminate
+				else
+					command.set_environment_variable ("OS_PROCESS_ACTIVE_CHANGE", "forbidden")
 				end
 				successful := True
 			end
@@ -91,8 +102,10 @@ feature {NONE} -- Implementation
 
 	terminate_operation: INTEGER = 4
 
+	set_environment_operation: INTEGER = 5
+
 invariant
 
-	valid_operation: operation = poll_operation or operation = wait_operation or operation = terminate_operation
+	valid_operation: operation = poll_operation or operation = wait_operation or operation = terminate_operation or operation = set_environment_operation
 
 end

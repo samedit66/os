@@ -4,7 +4,10 @@ note
 	"[
         Reusable command configuration that launches and observes one native
         process at a time, with optional input, output callbacks, and shell
-        execution.
+        execution. Each command owns an environment snapshot. A bare executable
+        is resolved through that snapshot's PATH on both Unix and Windows,
+        avoiding the platform difference where CreateProcessW otherwise searches
+        with the parent process environment.
     ]"
 	author: "samedit66 <samedit66@yandex.ru>"
 	library: "os"
@@ -32,6 +35,7 @@ feature {NONE} -- Initialization
 			argument_copy: STRING_32
 		do
 			create command_mutex.make
+			create environment.make
 			create executable.make_from_string_general (a_executable)
 			create arguments.make (8)
 			create input.make_empty
@@ -115,6 +119,109 @@ feature -- Change
 			end
 		end
 
+	set_environment_variable (a_name, a_value: READABLE_STRING_GENERAL)
+			-- Set copied environment variable `a_name` for subsequent executions.
+			-- Names are case-sensitive on Unix and case-insensitive on Windows.
+		require
+			can_start: can_start
+			name_not_empty: not a_name.is_empty
+			name_has_no_nul: not a_name.has_code (0)
+			name_has_no_equal: not a_name.has ('=')
+			value_has_no_nul: not a_value.has_code (0)
+		local
+			mutex_locked: BOOLEAN
+		do
+			command_mutex.lock
+			mutex_locked := True
+			if not can_start_unlocked then
+				raise_client_failure ("Cannot change environment while a command is running")
+			end
+			environment.set_variable (a_name, a_value)
+			command_mutex.unlock
+			mutex_locked := False
+		ensure
+			variable_set: environment.has_variable (a_name)
+			value_set: environment.variable (a_name).same_string_general (a_value)
+		rescue
+			if mutex_locked then
+				command_mutex.unlock
+			end
+		end
+
+	unset_environment_variable (a_name: READABLE_STRING_GENERAL)
+			-- Remove environment variable `a_name` from subsequent executions.
+			-- Names are case-sensitive on Unix and case-insensitive on Windows.
+		require
+			can_start: can_start
+			name_not_empty: not a_name.is_empty
+			name_has_no_nul: not a_name.has_code (0)
+			name_has_no_equal: not a_name.has ('=')
+		local
+			mutex_locked: BOOLEAN
+		do
+			command_mutex.lock
+			mutex_locked := True
+			if not can_start_unlocked then
+				raise_client_failure ("Cannot change environment while a command is running")
+			end
+			environment.unset_variable (a_name)
+			command_mutex.unlock
+			mutex_locked := False
+		ensure
+			variable_absent: not environment.has_variable (a_name)
+		rescue
+			if mutex_locked then
+				command_mutex.unlock
+			end
+		end
+
+	clear_environment
+			-- Remove all environment variables from subsequent executions.
+			-- No PATH or Windows SYSTEMROOT value is injected after this call.
+		require
+			can_start: can_start
+		local
+			mutex_locked: BOOLEAN
+		do
+			command_mutex.lock
+			mutex_locked := True
+			if not can_start_unlocked then
+				raise_client_failure ("Cannot change environment while a command is running")
+			end
+			environment.clear
+			command_mutex.unlock
+			mutex_locked := False
+		rescue
+			if mutex_locked then
+				command_mutex.unlock
+			end
+		end
+
+	prepend_to_path (a_directory: READABLE_STRING_GENERAL)
+			-- Prepend `a_directory` to PATH for lookup and child execution.
+			-- PATH uses ':' on Unix and ';' on Windows. An absent or empty PATH
+			-- becomes exactly `a_directory`, without an implicit current directory.
+		require
+			can_start: can_start
+			directory_not_empty: not a_directory.is_empty
+			directory_has_no_nul: not a_directory.has_code (0)
+		local
+			mutex_locked: BOOLEAN
+		do
+			command_mutex.lock
+			mutex_locked := True
+			if not can_start_unlocked then
+				raise_client_failure ("Cannot change environment while a command is running")
+			end
+			environment.prepend_to_path (a_directory)
+			command_mutex.unlock
+			mutex_locked := False
+		rescue
+			if mutex_locked then
+				command_mutex.unlock
+			end
+		end
+
 feature -- Execution
 
 	run
@@ -145,6 +252,8 @@ feature -- Execution
 			can_start: can_start
 		local
 			process: OS_PROCESS
+			launch_directory: PATH
+			resolved_executable: STRING_32
 			mutex_locked: BOOLEAN
 		do
 			command_mutex.lock
@@ -152,7 +261,13 @@ feature -- Execution
 			if not can_start_unlocked then
 				raise_client_failure ("Cannot start overlapping command executions")
 			end
-			create process.make (executable, arguments, a_stdout, a_stderr, working_directory, input)
+			launch_directory := effective_working_directory_unlocked
+			if environment.has_executable_in (executable, launch_directory) then
+				resolved_executable := environment.executable_path_in (executable, launch_directory)
+				create process.make (resolved_executable, arguments, a_stdout, a_stderr, working_directory, input, environment.entries)
+			else
+				create process.make_unresolved (executable)
+			end
 			current_process := process
 			has_started_state := True
 			latest_execution_result := Void
@@ -213,6 +328,31 @@ feature -- Execution
 
 feature -- Access
 
+	executable_path (a_name: READABLE_STRING_GENERAL): STRING_32
+			-- Absolute normalized path of executable `a_name` for Current.
+			-- A bare name uses Current's PATH on both Unix and Windows. Relative
+			-- PATH entries use Current's configured working directory.
+		require
+			name_not_empty: not a_name.is_empty
+			name_has_no_nul: not a_name.has_code (0)
+			executable_exists: has_executable (a_name)
+		local
+			launch_directory: PATH
+			executable_snapshot: detachable STRING_32
+		do
+			command_mutex.lock
+			launch_directory := effective_working_directory_unlocked
+			if environment.has_executable_in (a_name, launch_directory) then
+				executable_snapshot := environment.executable_path_in (a_name, launch_directory)
+			end
+			command_mutex.unlock
+			check
+				attached executable_snapshot as resolved
+			then
+				Result := resolved
+			end
+		end
+
 	execution_result: OS_PROCESS_EXECUTION_RESULT
 			-- Terminal result of the latest execution.
 		require
@@ -252,6 +392,22 @@ feature -- Access
 		end
 
 feature -- Status report
+
+	has_executable (a_name: READABLE_STRING_GENERAL): BOOLEAN
+			-- Does executable `a_name` resolve for Current?
+			-- A bare name uses Current's PATH on both Unix and Windows. No parent
+			-- PATH fallback is used after PATH is removed or the environment cleared.
+		require
+			name_not_empty: not a_name.is_empty
+			name_has_no_nul: not a_name.has_code (0)
+		local
+			launch_directory: PATH
+		do
+			command_mutex.lock
+			launch_directory := effective_working_directory_unlocked
+			Result := environment.has_executable_in (a_name, launch_directory)
+			command_mutex.unlock
+		end
 
 	has_started: BOOLEAN
 			-- Has Current started at least one execution?
@@ -332,6 +488,18 @@ feature {NONE} -- State publication
 			Result := not has_started_state or else finished_state
 		end
 
+	effective_working_directory_unlocked: PATH
+			-- Absolute working directory used for lookup while `command_mutex` is held.
+		do
+			if attached working_directory as directory then
+				create Result.make_from_string (directory)
+			else
+				Result := {EXECUTION_ENVIRONMENT}.current_working_path
+			end
+		ensure
+			absolute: Result.is_absolute
+		end
+
 feature {NONE} -- Error reporting
 
 	raise_client_failure (a_message: READABLE_STRING_8)
@@ -345,12 +513,16 @@ feature {NONE} -- Shell implementation
 	shell_executable: STRING_32
 			-- Executable for the platform command shell.
 		local
-			environment: EXECUTION_ENVIRONMENT
+			execution_environment: EXECUTION_ENVIRONMENT
+			system_shell: PATH
 		do
 			if {PLATFORM}.is_windows then
-				create environment
-				if attached environment.item ("COMSPEC") as command_processor and then not command_processor.is_empty then
+				create execution_environment
+				if attached execution_environment.item ("COMSPEC") as command_processor and then not command_processor.is_empty then
 					Result := command_processor.to_string_32
+				elseif attached execution_environment.item ("SystemRoot") as root and then not root.is_empty then
+					create system_shell.make_from_string (root)
+					Result := system_shell.extended ("System32").extended ("cmd.exe").canonical_path.name.to_string_32
 				else
 					create Result.make_from_string_general ("cmd.exe")
 				end
@@ -394,6 +566,9 @@ feature {NONE} -- Implementation
 
 	input: STRING_8
 			-- Raw standard-input bytes for subsequent executions.
+
+	environment: OS_ENVIRONMENT
+			-- Owned variable snapshot and executable resolver.
 
 	command_mutex: MUTEX
 			-- Lock protecting configuration and current execution publication.

@@ -20,6 +20,7 @@
 #include <signal.h>
 #include <spawn.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -35,6 +36,26 @@ struct os_process
     int exit_code;
     int has_exited;
 };
+
+char *os_environment_entry(int index, int *error_code)
+{
+    char *result;
+    size_t count;
+    if (index < 0 || error_code == NULL)
+        return NULL;
+    *error_code = 0;
+    if (environ == NULL || environ[index] == NULL)
+        return NULL;
+    count = strlen(environ[index]) + 1;
+    result = (char *)malloc(count);
+    if (result == NULL)
+    {
+        *error_code = ENOMEM;
+        return NULL;
+    }
+    memcpy(result, environ[index], count);
+    return result;
+}
 
 static void close_fd(int *fd)
 {
@@ -82,7 +103,8 @@ static int decoded_exit_code(int status)
 }
 
 os_process *os_process_start(const char *executable, char *const arguments[],
-                             const char *working_directory, int *error_code)
+                             char *const environment[], const char *working_directory,
+                             int *error_code)
 {
     int stdin_pipe[2] = {-1, -1};
     int stdout_pipe[2] = {-1, -1};
@@ -97,7 +119,7 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     {
         *error_code = 0;
     }
-    if (executable == NULL || arguments == NULL || error_code == NULL)
+    if (executable == NULL || arguments == NULL || environment == NULL || error_code == NULL)
     {
         return NULL;
     }
@@ -161,7 +183,9 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     }
 #undef ADD_ACTION
 
-    result = posix_spawnp(&pid, executable, &actions, NULL, arguments, environ);
+    /* OS_COMMAND resolves executable against its own PATH. Use posix_spawn,
+       not posix_spawnp, so Unix cannot search the parent process environment. */
+    result = posix_spawn(&pid, executable, &actions, NULL, arguments, environment);
     if (result != 0)
         goto fail;
     (void)posix_spawn_file_actions_destroy(&actions);

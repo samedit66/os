@@ -66,6 +66,17 @@ feature {NONE} -- Child modes
 			elseif mode.same_string_general ("working-directory") then
 				create environment
 				io.put_string (utf_8 (environment.current_working_path.name))
+			elseif mode.same_string_general ("environment-variable") and then a_arguments.argument_count >= 3 then
+				create environment
+				if attached environment.item (a_arguments.argument (3)) as value then
+					if value.is_empty then
+						io.put_string ("empty")
+					else
+						io.put_string (utf_8 (value))
+					end
+				else
+					io.put_string ("absent")
+				end
 			elseif mode.same_string_general ("sleep") then
 				create environment
 				environment.sleep (10_000_000_000)

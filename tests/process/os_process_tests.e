@@ -384,6 +384,90 @@ feature -- Test
 			assert_integers_equal ("PATH lookup", 0, process_result.exit_code)
 		end
 
+	test_configured_environment
+			-- Set, empty, remove, and clear variables in sequential child executions.
+		local
+			command: OS_COMMAND
+			process_result: OS_PROCESS_EXECUTION_RESULT
+		do
+			create command.make (process_child_executable, environment_arguments (environment_test_variable))
+			command.set_environment_variable (environment_test_variable, "configured")
+			command.run
+			process_result := command.execution_result
+			assert_readable_strings_equal ("configured variable", "configured", process_result.stdout)
+			command.set_environment_variable (environment_test_variable, "")
+			command.run
+			assert_readable_strings_equal ("empty variable", "empty", command.execution_result.stdout)
+			command.unset_environment_variable (environment_test_variable)
+			command.run
+			assert_readable_strings_equal ("unset variable", "absent", command.execution_result.stdout)
+			command.set_environment_variable (environment_test_variable, "before clear")
+			command.clear_environment
+			command.run
+			assert_readable_strings_equal ("cleared variable", "absent", command.execution_result.stdout)
+		end
+
+	test_command_environment_path_lookup
+			-- Use only the command PATH for lookup and expose the same resolved path.
+		local
+			command: OS_COMMAND
+			executable: PATH
+			executable_name: PATH
+		do
+			create executable.make_from_string (process_child_executable)
+			executable := executable.canonical_path
+			check
+				attached executable.entry as entry
+			then
+				executable_name := entry
+			end
+			create command.make (executable_name.name, child_arguments ("emit"))
+			command.clear_environment
+			assert_false ("bare executable absent without PATH", command.has_executable (executable_name.name))
+			command.prepend_to_path (executable.parent.name)
+			assert_true ("bare executable found in command PATH", command.has_executable (executable_name.name))
+			assert_general_strings_equal ("command executable path", executable.name, command.executable_path (executable_name.name))
+			command.run
+			assert_true ("configured PATH launch", command.execution_result.successful)
+			assert_readable_strings_equal ("configured PATH output", "stdout-data", command.execution_result.stdout)
+		end
+
+	test_removed_path_has_no_parent_fallback
+			-- Do not resolve a bare executable from the parent PATH after PATH removal.
+		local
+			command: OS_COMMAND
+		do
+			create command.make ("git", create {ARRAYED_LIST [READABLE_STRING_GENERAL]}.make (0))
+			command.unset_environment_variable ("PATH")
+			assert_false ("git absent without command PATH", command.has_executable ("git"))
+			command.run
+			assert_false ("removed PATH not launched", command.execution_result.was_launched)
+			assert_true ("removed PATH launch failure", command.execution_result.has_failures)
+		end
+
+	test_relative_command_path_uses_working_directory
+			-- Resolve relative PATH entries against the command working directory.
+		local
+			command: OS_COMMAND
+			executable: PATH
+			executable_name: PATH
+		do
+			create executable.make_from_string (process_child_executable)
+			executable := executable.canonical_path
+			check
+				attached executable.entry as entry
+			then
+				executable_name := entry
+			end
+			create command.make (executable_name.name, child_arguments ("emit"))
+			command.set_working_directory (executable.parent.name)
+			command.clear_environment
+			command.prepend_to_path (".")
+			assert_general_strings_equal ("relative PATH resolution", executable.name, command.executable_path (executable_name.name))
+			command.run
+			assert_true ("relative PATH launch", command.execution_result.successful)
+		end
+
 	test_shell
 			-- Interpret command chaining and redirection through the platform shell.
 		local
@@ -526,6 +610,27 @@ feature -- Test
 			command.terminate
 			command.wait_for_exit
 			assert_true ("terminal command can start", command.can_start)
+		end
+
+	test_active_command_environment_change_is_forbidden
+			-- Reject environment changes while an execution is active.
+		local
+			command: OS_COMMAND
+			changer: OS_COMMAND_LIFECYCLE_CALLER
+			changer_launched: BOOLEAN
+		do
+			create command.make (process_child_executable, child_arguments ("sleep"))
+			command.start
+			create changer.make_set_environment (command)
+			changer.launch
+			changer_launched := changer.is_last_launch_successful
+			if changer_launched then
+				changer.join
+			end
+			command.terminate
+			command.wait_for_exit
+			assert_true ("environment changer launched", changer_launched)
+			assert_false ("active environment change rejected", changer.successful)
 		end
 
 	test_inherited_working_directory
@@ -680,6 +785,15 @@ feature {NONE} -- Support
 			Result.extend (a_mode)
 		end
 
+	environment_arguments (a_name: READABLE_STRING_GENERAL): ARRAYED_LIST [READABLE_STRING_GENERAL]
+			-- Arguments asking the child to report environment variable `a_name`.
+		do
+			create Result.make (3)
+			Result.extend ("--child")
+			Result.extend ("environment-variable")
+			Result.extend (a_name)
+		end
+
 	indexable_count (a_items: READABLE_INDEXABLE [OS_PROCESS_FAILURE]): INTEGER
 			-- Number of items in `a_items`.
 		do
@@ -766,6 +880,12 @@ feature {NONE} -- Support
 			assert_true (a_tag, a_actual.same_string (a_expected))
 		end
 
+	assert_general_strings_equal (a_tag: STRING_8; a_expected, a_actual: READABLE_STRING_GENERAL)
+			-- Assert that `a_actual` has the same characters as `a_expected`.
+		do
+			assert_true (a_tag, a_actual.same_string (a_expected))
+		end
+
 feature {NONE} -- State
 
 	callback_stdout: STRING_8
@@ -779,6 +899,8 @@ feature {NONE} -- State
 feature {NONE} -- Constants
 
 	process_child_variable: STRING = "process_child"
+
+	environment_test_variable: STRING_32 = "OS_PROCESS_TEST_ENVIRONMENT_VALUE"
 
 	large_block_size: INTEGER = 4096
 

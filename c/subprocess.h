@@ -9,13 +9,24 @@ extern "C"
     typedef struct os_process os_process;
 
     /*
-     * Start a process from a NULL-terminated UTF-8 argument vector whose first
-     * item names the executable. working_directory may be NULL. On success the
-     * caller owns the returned process and error_code is zero. On failure NULL is
+     * Return an allocated UTF-8 copy of environment entry index, or NULL when
+     * index is past the end. The caller owns a non-NULL result and releases it
+     * with free. error_code is zero for success/end and positive on failure.
+     */
+    char *os_environment_entry(int index, int *error_code);
+
+    /*
+     * Start a process from NULL-terminated UTF-8 argument and environment
+     * vectors. executable is already resolved and the environment entries have
+     * NAME=VALUE form. working_directory may be NULL. On POSIX the environment
+     * vector is passed directly to posix_spawn. On Windows it is converted to a
+     * sorted UTF-16 environment block for CreateProcessW. On success the caller
+     * owns the returned process and error_code is zero. On failure NULL is
      * returned and error_code receives a positive platform error code.
      */
     os_process *os_process_start(const char *executable, char *const arguments[],
-                                 const char *working_directory, int *error_code);
+                                 char *const environment[], const char *working_directory,
+                                 int *error_code);
 
     /*
      * Exactly one caller may use each standard-I/O endpoint. The stdout reader,

@@ -57,6 +57,58 @@ static wchar_t *utf8_to_wide(const char *text, int *error_code)
     return result;
 }
 
+static char *wide_to_utf8(const wchar_t *text, int *error_code)
+{
+    int count = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, -1, NULL, 0, NULL, NULL);
+    char *result;
+    if (count == 0)
+    {
+        *error_code = error_as_int(GetLastError());
+        return NULL;
+    }
+    result = (char *)malloc((size_t)count);
+    if (result == NULL)
+    {
+        *error_code = ERROR_NOT_ENOUGH_MEMORY;
+        return NULL;
+    }
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, -1, result, count, NULL, NULL) ==
+        0)
+    {
+        *error_code = error_as_int(GetLastError());
+        free(result);
+        return NULL;
+    }
+    return result;
+}
+
+char *os_environment_entry(int index, int *error_code)
+{
+    LPWCH environment;
+    const wchar_t *entry;
+    int current = 0;
+    char *result = NULL;
+    if (index < 0 || error_code == NULL)
+        return NULL;
+    *error_code = 0;
+    environment = GetEnvironmentStringsW();
+    if (environment == NULL)
+    {
+        *error_code = error_as_int(GetLastError());
+        return NULL;
+    }
+    entry = environment;
+    while (*entry != L'\0' && current < index)
+    {
+        entry += wcslen(entry) + 1;
+        ++current;
+    }
+    if (*entry != L'\0')
+        result = wide_to_utf8(entry, error_code);
+    (void)FreeEnvironmentStringsW(environment);
+    return result;
+}
+
 static int append_wide(wide_buffer *buffer, wchar_t value)
 {
     size_t capacity;
@@ -156,6 +208,64 @@ static wchar_t *build_command_line(char *const arguments[], int *error_code)
     return buffer.data;
 }
 
+static int compare_environment_entries(const void *left, const void *right)
+{
+    const wchar_t *const *left_entry = (const wchar_t *const *)left;
+    const wchar_t *const *right_entry = (const wchar_t *const *)right;
+    return _wcsicmp(*left_entry, *right_entry);
+}
+
+static wchar_t *build_environment_block(char *const environment[], int *error_code)
+{
+    wchar_t **entries = NULL;
+    wchar_t *block = NULL;
+    size_t count = 0;
+    size_t index;
+    size_t block_count = 1;
+    size_t offset = 0;
+
+    while (environment[count] != NULL)
+        ++count;
+    if (count > 0)
+    {
+        entries = (wchar_t **)calloc(count, sizeof(*entries));
+        if (entries == NULL)
+        {
+            *error_code = ERROR_NOT_ENOUGH_MEMORY;
+            return NULL;
+        }
+    }
+    for (index = 0; index < count; ++index)
+    {
+        entries[index] = utf8_to_wide(environment[index], error_code);
+        if (entries[index] == NULL)
+            goto fail;
+        block_count += wcslen(entries[index]) + 1;
+    }
+    if (count > 1)
+        qsort(entries, count, sizeof(*entries), compare_environment_entries);
+    if (block_count < 2)
+        block_count = 2;
+    block = (wchar_t *)calloc(block_count, sizeof(*block));
+    if (block == NULL)
+    {
+        *error_code = ERROR_NOT_ENOUGH_MEMORY;
+        goto fail;
+    }
+    for (index = 0; index < count; ++index)
+    {
+        size_t entry_count = wcslen(entries[index]) + 1;
+        wmemcpy(block + offset, entries[index], entry_count);
+        offset += entry_count;
+    }
+
+fail:
+    for (index = 0; index < count; ++index)
+        free(entries[index]);
+    free(entries);
+    return block;
+}
+
 static void close_handle(HANDLE *handle)
 {
     if (*handle != NULL && *handle != INVALID_HANDLE_VALUE)
@@ -165,14 +275,9 @@ static void close_handle(HANDLE *handle)
     }
 }
 
-static int executable_is_path_like(const char *executable)
-{
-    return strchr(executable, '/') != NULL || strchr(executable, '\\') != NULL ||
-           (executable[0] != '\0' && executable[1] == ':');
-}
-
 os_process *os_process_start(const char *executable, char *const arguments[],
-                             const char *working_directory, int *error_code)
+                             char *const environment[], const char *working_directory,
+                             int *error_code)
 {
     SECURITY_ATTRIBUTES security = {sizeof(security), NULL, TRUE};
     HANDLE stdout_read = NULL, stdout_write = NULL;
@@ -184,6 +289,7 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     HANDLE inherited[3];
     wchar_t *command_line = NULL;
     wchar_t *application_name = NULL;
+    wchar_t *environment_block = NULL;
     wchar_t *working_directory_wide = NULL;
     os_process *process = NULL;
     DWORD windows_error = ERROR_SUCCESS;
@@ -191,7 +297,7 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     if (error_code == NULL)
         return NULL;
     *error_code = 0;
-    if (executable == NULL || arguments == NULL)
+    if (executable == NULL || arguments == NULL || environment == NULL)
     {
         *error_code = ERROR_INVALID_PARAMETER;
         return NULL;
@@ -199,12 +305,12 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     command_line = build_command_line(arguments, error_code);
     if (command_line == NULL)
         goto fail;
-    if (executable_is_path_like(executable))
-    {
-        application_name = utf8_to_wide(executable, error_code);
-        if (application_name == NULL)
-            goto fail;
-    }
+    application_name = utf8_to_wide(executable, error_code);
+    if (application_name == NULL)
+        goto fail;
+    environment_block = build_environment_block(environment, error_code);
+    if (environment_block == NULL)
+        goto fail;
     if (working_directory != NULL)
     {
         working_directory_wide = utf8_to_wide(working_directory, error_code);
@@ -246,8 +352,12 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     }
 
     ZeroMemory(&information, sizeof(information));
+    /* CreateProcessW does not resolve an executable with the PATH contained in
+       lpEnvironment. OS_COMMAND has already resolved application_name so the
+       child environment and executable lookup use the same snapshot. */
     if (!CreateProcessW(application_name, command_line, NULL, NULL, TRUE,
-                        EXTENDED_STARTUPINFO_PRESENT, NULL, working_directory_wide,
+                        EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
+                        environment_block, working_directory_wide,
                         &startup.StartupInfo, &information))
     {
         windows_error = GetLastError();
@@ -283,6 +393,7 @@ fail:
     }
     free(command_line);
     free(application_name);
+    free(environment_block);
     free(working_directory_wide);
     close_handle(&stdout_read);
     close_handle(&stdout_write);

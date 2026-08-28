@@ -25,6 +25,7 @@ with EiffelStudio and Gobo Eiffel on Linux, macOS, and Windows.
 | Class | Purpose |
 | --- | --- |
 | [`OS_COMMAND`](src/process/os_command.e) | Configure and sequentially execute a command, including polling, waiting, and termination |
+| [`OS_ENVIRONMENT`](src/process/os_environment.e) | Store a copied environment and resolve executables through its `PATH` |
 | [`OS_PROCESS_EXECUTION_RESULT`](src/process/os_process_execution_result.e) | Inspect launch status, optional exit code, captured output, and structured failures |
 | [`OS_PROCESS_FAILURE`](src/process/os_process_failure.e) | Inspect one portable process-library failure and its optional native code |
 | [`OS_FILE_PATH`](src/file_path/os_file_path.e) | Compose and inspect paths and perform common file and directory operations |
@@ -117,6 +118,38 @@ Set optional input or a working directory before calling `run` or `start`:
 command.set_working_directory ("/path/to/repository")
 command.set_input ("input bytes%N")
 ```
+
+Each command also owns an environment snapshot. Change it without modifying the
+environment of the current application:
+
+```eiffel
+command.set_environment_variable ("ISE_EIFFEL", ise_path)
+command.unset_environment_variable ("GIT_DIR")
+command.prepend_to_path (toolchain_bin)
+```
+
+`prepend_to_path` keeps the remaining inherited `PATH` while giving the new
+directory lookup priority. Use `clear_environment` when the child should receive
+no inherited variables. The library does not reinsert `PATH` or `SystemRoot`
+after clearing.
+
+The same effective `PATH` is used both to resolve a bare executable and as the
+value seen by the child. This is deliberately consistent across platforms:
+native Windows `CreateProcessW` would otherwise search using the parent process
+environment rather than the environment block supplied to the child.
+
+Check or inspect resolution without starting the command:
+
+```eiffel
+if command.has_executable ("ec") then
+    io.put_string (command.executable_path ("ec"))
+end
+```
+
+`executable_path` returns an absolute normalized path. Removing `PATH` disables
+lookup of bare executable names; it does not fall back to the parent `PATH`.
+Explicit paths remain usable. Relative `PATH` entries are interpreted against
+the command's configured working directory.
 
 `set_working_directory` accepts a `READABLE_STRING_GENERAL` and stores a
 normalized absolute snapshot immediately. When using `OS_FILE_PATH`, pass its
@@ -232,6 +265,14 @@ not text.
   `was_launched = True` and `has_exit_code = True`.
 - Executable names, arguments, shell commands, and working directories reject
   embedded NUL characters. Standard input is a byte stream and may contain NUL.
+- Environment names reject NUL and `=`; values reject NUL but may be empty. An
+  empty value is distinct from an unset variable. Names are case-sensitive on
+  Unix and case-insensitive on Windows.
+- Executable lookup separates `PATH` entries with `:` on Unix and `;` on
+  Windows. Unix candidates must be plain files executable by the current
+  process. Windows candidates must be plain files and an extensionless name is
+  also tried with `.exe`; final image validation remains the responsibility of
+  `CreateProcessW`.
 - A descendant can inherit the stdout or stderr pipe. In that case the direct
   child may already have exited while `wait_for_exit` still waits for reader
   EOF.

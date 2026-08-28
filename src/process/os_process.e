@@ -3,7 +3,9 @@ note
 	description:
 	"[
         Internal owner of a native process handle, its pipe workers, captured
-        output, failures, and lifecycle state.
+        output, failures, and lifecycle state. The executable path and complete
+        environment are resolved by `OS_COMMAND` before entry to the native
+        layer, so Unix and Windows launch the same configured snapshot.
     ]"
 	author: "samedit66 <samedit66@yandex.ru>"
 	library: "os"
@@ -13,29 +15,57 @@ class OS_PROCESS
 
 create {OS_COMMAND}
 
-	make
+	make,
+	make_unresolved
 
 feature {NONE} -- Initialization
 
-	make (a_executable: READABLE_STRING_GENERAL; a_arguments: ITERABLE [READABLE_STRING_GENERAL]; a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_working_directory: detachable READABLE_STRING_GENERAL; a_input: READABLE_STRING_8)
-			-- Launch the native process and its Eiffel pipe workers.
+	make (a_executable: READABLE_STRING_GENERAL; a_arguments: ITERABLE [READABLE_STRING_GENERAL]; a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_working_directory: detachable READABLE_STRING_GENERAL; a_input: READABLE_STRING_8; a_environment: ITERABLE [READABLE_STRING_GENERAL])
+			-- Launch the native process and its Eiffel pipe workers with `a_environment`.
+			-- Environment entries are encoded as UTF-8 on Unix. On Windows the
+			-- native bridge converts them to a sorted UTF-16 environment block.
+		do
+			initialize_state
+			launch_process (a_executable, a_arguments, a_stdout, a_stderr, a_working_directory, a_input, a_environment)
+		ensure
+			launch_failure_is_terminal: not was_launched implies is_finished
+		end
+
+	make_unresolved (a_executable: READABLE_STRING_GENERAL)
+			-- Publish a launch failure because `a_executable` could not be resolved.
+			-- This preserves the same terminal result on Unix and Windows without
+			-- allowing either platform to fall back to the parent process PATH.
+		local
+			failure: OS_PROCESS_FAILURE
+		do
+			initialize_state
+			create failure.make (new_launch_kind, "launch", "Cannot resolve executable through command environment")
+			record_failure (failure)
+			process_exited := True
+			complete
+		ensure
+			not_launched: not was_launched
+			finished: is_finished
+		end
+
+	initialize_state
+			-- Establish empty lifecycle and result storage before launch.
 		do
 			create lifecycle_mutex.make
 			create state_mutex.make
 			create failure_storage.make (4)
 			create stdout_snapshot.make_empty
 			create stderr_snapshot.make_empty
-			launch_process (a_executable, a_arguments, a_stdout, a_stderr, a_working_directory, a_input)
-		ensure
-			launch_failure_is_terminal: not was_launched implies is_finished
 		end
 
-	launch_process (a_executable: READABLE_STRING_GENERAL; a_arguments: ITERABLE [READABLE_STRING_GENERAL]; a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_working_directory: detachable READABLE_STRING_GENERAL; a_input: READABLE_STRING_8)
+	launch_process (a_executable: READABLE_STRING_GENERAL; a_arguments: ITERABLE [READABLE_STRING_GENERAL]; a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_working_directory: detachable READABLE_STRING_GENERAL; a_input: READABLE_STRING_8; a_environment: ITERABLE [READABLE_STRING_GENERAL])
 			-- Launch after all recovery state has been initialized.
 		local
 			executable_c: C_STRING
 			argument_strings: ARRAYED_LIST [C_STRING]
+			environment_strings: ARRAYED_LIST [C_STRING]
 			argument_vector: MANAGED_POINTER
+			environment_vector: MANAGED_POINTER
 			error_area: MANAGED_POINTER
 			working_directory_c: detachable C_STRING
 			out_reader: OS_PROCESS_PIPE_READER
@@ -65,12 +95,31 @@ feature {NONE} -- Initialization
 				offset := offset + {PLATFORM}.pointer_bytes
 			end
 			argument_vector.put_pointer (default_pointer, offset)
+			create environment_strings.make (40)
+			across
+				a_environment
+			as
+				entry
+			loop
+				environment_strings.extend (create {C_STRING}.make (utf_8 (entry)))
+			end
+			create environment_vector.make ((environment_strings.count + 1) * {PLATFORM}.pointer_bytes)
+			offset := 0
+			across
+				environment_strings
+			as
+				entry
+			loop
+				environment_vector.put_pointer (entry.item, offset)
+				offset := offset + {PLATFORM}.pointer_bytes
+			end
+			environment_vector.put_pointer (default_pointer, offset)
 			if attached a_working_directory as directory then
 				create working_directory_c.make (utf_8 (directory))
 				working_directory_pointer := working_directory_c.item
 			end
 			create error_area.make ({PLATFORM}.integer_32_bytes)
-			native_handle := c_start (executable_c.item, argument_vector.item, working_directory_pointer, error_area.item)
+			native_handle := c_start (executable_c.item, argument_vector.item, environment_vector.item, working_directory_pointer, error_area.item)
 			if native_handle = default_pointer then
 				launch_error := error_area.read_integer_32 (0)
 				record_native_failure (new_launch_kind, "launch", "Cannot start process", launch_error)
@@ -585,7 +634,7 @@ feature {NONE} -- Exceptional invariant recovery
 
 feature {NONE} -- Native bridge
 
-	c_start (a_executable, a_arguments, a_working_directory, a_error: POINTER): POINTER
+	c_start (a_executable, a_arguments, a_environment, a_working_directory, a_error: POINTER): POINTER
 		external
 			"C use <subprocess.h>"
 		alias

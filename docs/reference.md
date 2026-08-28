@@ -4,16 +4,15 @@ This guide describes the behavior shared by EiffelStudio and Gobo Eiffel.
 Public Eiffel classes and their contracts remain the source of truth for exact
 feature signatures and preconditions.
 
-## Package configurations
+## Package configuration
 
-| ECF file | Public module | Native build target | Thread library |
-| --- | --- | --- | --- |
-| [`os.ecf`](../os.ecf) | Process and file path | `make native` | Required |
-| [`process.ecf`](../process.ecf) | Process only | `make native-process` | Required |
-| [`file_path.ecf`](../file_path.ecf) | File path only | `make native-file-path` | Not required by the library target |
+[`os.ecf`](../os.ecf) is the single public library configuration. It exposes
+the process and file-path APIs, requires Eiffel thread support, and links the
+native archive produced by `make native` on POSIX or `build-native.cmd` on
+Windows.
 
-The native implementations are C11 archives. Process integration is in
-[`subprocess_posix.c`](../c/subprocess_posix.c) and
+The native implementations are combined in one C11 archive. Process
+integration is in [`subprocess_posix.c`](../c/subprocess_posix.c) and
 [`subprocess_windows.c`](../c/subprocess_windows.c). File-system operations
 that require common cross-compiler semantics are in
 [`file_path_posix.c`](../c/file_path_posix.c) and

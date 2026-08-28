@@ -37,34 +37,36 @@ git submodule add https://github.com/samedit66/os.git vendor/os
 git submodule update --init
 ```
 
-Reference the complete package from the consuming project's ECF file:
+Reference the package from the consuming project's ECF file:
 
 ```xml
 <library name="os" location="./vendor/os/os.ecf" readonly="true"/>
 ```
 
-Clients can instead import only one module:
+The library requires Eiffel thread support. Enable it in the consuming target:
 
 ```xml
-<library name="os_process" location="./vendor/os/process.ecf" readonly="true"/>
-<library name="os_file_path" location="./vendor/os/file_path.ecf" readonly="true"/>
+<capability>
+    <concurrency support="thread" use="thread"/>
+</capability>
 ```
 
-The complete package and the process module require Eiffel thread support.
-Build the required native archive before compiling the consuming project:
+On Linux and macOS, ensure that `make`, a C11 compiler, and an archiver are on
+`PATH`, then build the native archive before compiling the Eiffel project:
 
 ```console
-make -C vendor/os native            # complete package
-make -C vendor/os native-process    # process module only
-make -C vendor/os native-file-path  # file-path module only
+make -C vendor/os native
 ```
 
-On Windows, run the native build from a Visual Studio developer command
-prompt:
+This produces `vendor/os/build/native/libos_native.a`. Set `CC` or `AR` when
+the default `cc` and `ar` commands are not appropriate.
+
+On Windows, run the native build from a regular Command Prompt. The script
+locates an installed Visual Studio C++ toolchain and produces
+`vendor\os\build\native\os_native.lib`:
 
 ```console
-cd vendor\os
-.github\scripts\build-windows-c.cmd msvc library
+vendor\os\build-native.cmd
 ```
 
 ## Quick start

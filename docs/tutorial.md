@@ -1,9 +1,7 @@
 # Getting started with `os`
 
 This tutorial connects `os` to an Eiffel application, runs a process, handles
-its result, and performs a small file-system operation. The examples use the
-complete package; applications that need only one module can select a smaller
-ECF configuration.
+its result, and performs a small file-system operation.
 
 ## 1. Add the library
 
@@ -35,8 +33,11 @@ Build the native backends before compiling the Eiffel application:
 make -C vendor/os native
 ```
 
-Use `native-process` with `process.ecf`, or `native-file-path` with
-`file_path.ecf`, when the application imports only that module.
+On Windows, run the equivalent build from a regular Command Prompt:
+
+```console
+vendor\os\build-native.cmd
+```
 
 ## 2. Run a command
 

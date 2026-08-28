@@ -56,7 +56,7 @@ jobs:
       - name: Compile Windows bridge
         if: runner.os == 'Windows'
         shell: cmd
-        run: .github\scripts\build-windows-c.cmd ${{ matrix.compiler }}
+        run: build-native.cmd ${{ matrix.compiler }}
 
   gobo:
     name: Gobo / ${{ matrix.os }}
@@ -99,29 +99,11 @@ jobs:
       - name: Build and test
         if: runner.os != 'Windows'
         run: make test-gobo
-      - name: Build native libraries
+      - name: Build native library
         if: runner.os == 'Windows'
         shell: cmd
-        run: .github\scripts\build-windows-c.cmd msvc library
-      - name: Compile file path tests
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: |
-          call .github\scripts\setup-msvc.cmd
-          if errorlevel 1 exit /b 1
-          set "GOBO_CC=msc"
-          set "GOBO_EIFFEL=ge"
-          "%GOBO%\bin\getest.exe" -g tests\file_path\getest.cfg
-          if errorlevel 1 exit /b 1
-          "%GOBO%\bin\gec.exe" --variable=GOBO_EIFFEL=ge --ise=25.12 --gelint --target=os_file_path_tests file_path.ecf
-          if errorlevel 1 exit /b 1
-      - name: Run file path tests
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          & .\os_file_path_tests.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Compile process and facade tests
+        run: build-native.cmd
+      - name: Compile tests
         if: runner.os == 'Windows'
         shell: cmd
         run: |
@@ -129,25 +111,17 @@ jobs:
           if errorlevel 1 exit /b 1
           set "GOBO_CC=msc"
           set "GOBO_EIFFEL=ge"
-          "%GOBO%\bin\getest.exe" -g tests\process\getest.cfg
-          if errorlevel 1 exit /b 1
           "%GOBO%\bin\getest.exe" -g tests\getest.cfg
-          if errorlevel 1 exit /b 1
-          "%GOBO%\bin\gec.exe" --variable=GOBO_EIFFEL=ge --ise=25.12 --gelint --target=os_process_test_child process.ecf
-          if errorlevel 1 exit /b 1
-          "%GOBO%\bin\gec.exe" --variable=GOBO_EIFFEL=ge --ise=25.12 --gelint --target=os_process_tests process.ecf
           if errorlevel 1 exit /b 1
           "%GOBO%\bin\gec.exe" --variable=GOBO_EIFFEL=ge --ise=25.12 --gelint --target=os_process_test_child os.ecf
           if errorlevel 1 exit /b 1
           "%GOBO%\bin\gec.exe" --variable=GOBO_EIFFEL=ge --ise=25.12 --gelint --target=os_tests os.ecf
           if errorlevel 1 exit /b 1
-      - name: Run process and facade tests
+      - name: Run tests
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $child = Join-Path $pwd "os_process_test_child.exe"
-          & .\os_process_tests.exe -D "process_child=$child"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\os_tests.exe -D "process_child=$child"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -190,52 +164,27 @@ jobs:
       - name: Compile and test
         if: runner.os != 'Windows'
         run: make test-ise
-      - name: Build native libraries
+      - name: Build native library
         if: runner.os == 'Windows'
         shell: cmd
-        run: .github\scripts\build-windows-c.cmd msvc library
-      - name: Compile file path tests
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: |
-          call .github\scripts\setup-msvc.cmd
-          if errorlevel 1 exit /b 1
-          set "GOBO_EIFFEL=ise"
-          "%GOBO%\bin\getest.exe" -g tests\file_path\getest.cfg
-          if errorlevel 1 exit /b 1
-          ec.exe -batch -config file_path.ecf -target os_file_path_tests -c_compile
-          if errorlevel 1 exit /b 1
-      - name: Run file path tests
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          & .\EIFGENs\os_file_path_tests\W_code\os_file_path_tests.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Compile process and facade tests
+        run: build-native.cmd
+      - name: Compile tests
         if: runner.os == 'Windows'
         shell: cmd
         run: |
           call .github\scripts\setup-msvc.cmd
           if errorlevel 1 exit /b 1
           set "GOBO_EIFFEL=ise"
-          "%GOBO%\bin\getest.exe" -g tests\process\getest.cfg
-          if errorlevel 1 exit /b 1
           "%GOBO%\bin\getest.exe" -g tests\getest.cfg
-          if errorlevel 1 exit /b 1
-          ec.exe -batch -config process.ecf -target os_process_test_child -c_compile
-          if errorlevel 1 exit /b 1
-          ec.exe -batch -config process.ecf -target os_process_tests -c_compile
           if errorlevel 1 exit /b 1
           ec.exe -batch -config os.ecf -target os_process_test_child -c_compile
           if errorlevel 1 exit /b 1
           ec.exe -batch -config os.ecf -target os_tests -c_compile
           if errorlevel 1 exit /b 1
-      - name: Run process and facade tests
+      - name: Run tests
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $child = Join-Path $pwd "EIFGENs\os_process_test_child\W_code\os_process_test_child.exe"
-          & .\EIFGENs\os_process_tests\W_code\os_process_tests.exe -D "process_child=$child"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\EIFGENs\os_tests\W_code\os_tests.exe -D "process_child=$child"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

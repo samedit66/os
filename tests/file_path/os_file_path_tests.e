@@ -93,9 +93,138 @@ feature -- Test
 			assert_false ("missing does not exist", root.exists)
 			assert_false ("missing is not directory", root.is_directory)
 			assert_false ("missing is not plain file", root.is_plain_file)
+			assert_false ("missing is not symbolic link", root.is_symbolic_link)
 			assert_false ("missing is not empty directory", root.is_empty_directory)
+			assert_false ("missing is not executable", root.is_executable)
 			root.delete_recursively
 			assert_false ("missing delete is no-op", entry_exists (root))
+		end
+
+	test_entries_and_metadata
+			-- List direct children and report portable file metadata.
+		local
+			root: OS_FILE_PATH
+			text_file: OS_FILE_PATH
+			unicode_file: OS_FILE_PATH
+			directory_path: OS_FILE_PATH
+			late_file: OS_FILE_PATH
+			snapshot: ITERABLE [OS_FILE_PATH]
+			unicode_name: STRING_32
+		do
+			root := current_test_root
+			root.create_directory
+			text_file := root / "message.txt"
+			text_file.write_bytes ("four")
+			create unicode_name.make_from_string_general ("данные.txt")
+			unicode_file := root / unicode_name
+			unicode_file.write_text ("unicode")
+			directory_path := root / "nested"
+			directory_path.create_directory
+			snapshot := root.entries
+			late_file := root / "late.txt"
+			late_file.write_text ("late")
+			assert_integers_equal ("entry snapshot count", 3, iterable_count (snapshot))
+			assert_true ("entry has text file", iterable_has_path (snapshot, text_file))
+			assert_true ("entry has unicode file", iterable_has_path (snapshot, unicode_file))
+			assert_true ("entry has directory", iterable_has_path (snapshot, directory_path))
+			assert_false ("entry snapshot excludes later file", iterable_has_path (snapshot, late_file))
+			assert_true ("file size", text_file.size = 4)
+			text_file.set_executable
+			assert_true ("file executable", text_file.is_executable)
+		end
+
+	test_copy_rename_and_replace
+			-- Copy bytes and use distinct native rename and replacement operations.
+		local
+			root: OS_FILE_PATH
+			source: OS_FILE_PATH
+			copied_file: OS_FILE_PATH
+			renamed: OS_FILE_PATH
+			rename_name: IMMUTABLE_STRING_32
+			replacement: OS_FILE_PATH
+			target: OS_FILE_PATH
+			blocked_source: OS_FILE_PATH
+			blocked_target: OS_FILE_PATH
+			directory_path: OS_FILE_PATH
+			child_file: OS_FILE_PATH
+			renamed_directory: OS_FILE_PATH
+			raw_bytes: STRING_8
+		do
+			root := current_test_root
+			root.create_directory
+			source := root / "source.bin"
+			create raw_bytes.make_filled ('x', 4097)
+			raw_bytes.put ('%U', 1)
+			raw_bytes.put ('%/255/', raw_bytes.count)
+			source.write_bytes (raw_bytes)
+			copied_file := root / "copy.bin"
+			source.copy_to (copied_file)
+			assert_bytes_equal ("copy to absent file", raw_bytes, copied_file.bytes)
+			copied_file.write_text ("old")
+			source.copy_to (copied_file)
+			assert_bytes_equal ("copy replaces plain file", raw_bytes, copied_file.bytes)
+			assert_bytes_equal ("copy keeps source", raw_bytes, source.bytes)
+			assert_exception ("copy rejects same file", agent source.copy_to (source))
+			renamed := root / "renamed.bin"
+			rename_name := source.name
+			source.rename_to (renamed)
+			assert_false ("rename removes source", source.exists)
+			assert_bytes_equal ("rename keeps bytes", raw_bytes, renamed.bytes)
+			assert_equal ("rename keeps value name", rename_name, source.name)
+			directory_path := root / "directory"
+			directory_path.create_directory
+			child_file := directory_path / "child.txt"
+			child_file.write_text ("child")
+			renamed_directory := root / "renamed-directory"
+			directory_path.rename_to (renamed_directory)
+			assert_text_equal ("directory rename", "child", (renamed_directory / "child.txt").text)
+			target := root / "target.txt"
+			target.write_text ("old target")
+			replacement := root / "replacement.tmp"
+			replacement.write_text ("new target")
+			replacement.replace_with (target)
+			assert_false ("replace removes source", replacement.exists)
+			assert_text_equal ("replace changes target", "new target", target.text)
+			blocked_source := root / "blocked-source.txt"
+			blocked_source.write_text ("source remains")
+			blocked_target := root / "blocked-target.txt"
+			blocked_target.write_text ("target remains")
+			assert_exception ("rename rejects existing target", agent blocked_source.rename_to (blocked_target))
+			assert_text_equal ("failed rename keeps source", "source remains", blocked_source.text)
+			assert_text_equal ("failed rename keeps target", "target remains", blocked_target.text)
+			assert_exception ("replace rejects directory", agent blocked_source.replace_with (renamed_directory))
+		end
+
+	test_posix_links_as_operation_targets
+			-- Treat links as entries for replacement and detect hard-link aliases.
+		local
+			root: OS_FILE_PATH
+			original: OS_FILE_PATH
+			hard_link: OS_FILE_PATH
+			symlink_target: OS_FILE_PATH
+			symlink: OS_FILE_PATH
+			replacement: OS_FILE_PATH
+		do
+			if not {PLATFORM}.is_windows then
+				root := current_test_root
+				root.create_directory
+				original := root / "original.txt"
+				original.write_text ("original")
+				hard_link := root / "hard-link.txt"
+				create_hard_link (original, hard_link)
+				assert_exception ("copy rejects hard-link alias", agent original.copy_to (hard_link))
+				assert_text_equal ("hard-link rejection keeps contents", "original", original.text)
+				symlink_target := root / "symlink-target.txt"
+				symlink_target.write_text ("keep target")
+				symlink := root / "replaceable-link"
+				create_symbolic_link (symlink_target, symlink)
+				replacement := root / "replacement-link-source.txt"
+				replacement.write_text ("replacement")
+				replacement.replace_with (symlink)
+				assert_false ("replace removes symlink", symlink.is_symbolic_link)
+				assert_text_equal ("replace writes link path", "replacement", symlink.text)
+				assert_text_equal ("replace keeps link target", "keep target", symlink_target.text)
+			end
 		end
 
 	test_directories_and_files
@@ -265,6 +394,8 @@ feature -- Test
 				directory_link := root / "directory link's"
 				create_symbolic_link (target_directory, directory_link)
 				assert_true ("directory symlink created", entry_exists (directory_link))
+				assert_true ("directory symlink classified", directory_link.is_symbolic_link)
+				assert_integers_equal ("directory symlink entries", 1, iterable_count (directory_link.entries))
 				directory_link.delete_recursively
 				assert_false ("directory symlink removed", entry_exists (directory_link))
 				assert_true ("symlink target retained", target_file.exists)
@@ -273,6 +404,10 @@ feature -- Test
 				create_symbolic_link (missing_target, broken_link)
 				assert_true ("broken symlink created", entry_exists (broken_link))
 				assert_false ("broken symlink target absent", broken_link.exists)
+				assert_true ("broken symlink classified", broken_link.is_symbolic_link)
+				broken_link.rename_to (root / "renamed broken link's")
+				broken_link := root / "renamed broken link's"
+				assert_true ("broken symlink renamed", broken_link.is_symbolic_link)
 				broken_link.delete_recursively
 				assert_false ("broken symlink removed", entry_exists (broken_link))
 			end
@@ -323,6 +458,22 @@ feature {NONE} -- Support
 			assert_true (a_tag, a_actual.same_string (a_expected))
 		end
 
+	iterable_count (a_paths: ITERABLE [OS_FILE_PATH]): INTEGER
+			-- Number of paths in `a_paths`.
+		do
+			across a_paths as path_cursor loop
+				Result := Result + 1
+			end
+		end
+
+	iterable_has_path (a_paths: ITERABLE [OS_FILE_PATH]; a_expected: OS_FILE_PATH): BOOLEAN
+			-- Does `a_paths` contain a path named like `a_expected`?
+		do
+			across a_paths as path_cursor until Result loop
+				Result := path_cursor.name.same_string (a_expected.name)
+			end
+		end
+
 	current_test_root: OS_FILE_PATH
 			-- Root reserved for the current test.
 		require
@@ -365,6 +516,28 @@ feature {NONE} -- Support
 			environment: EXECUTION_ENVIRONMENT
 		do
 			create command.make_from_string_general ("ln -s ")
+			command.append (posix_shell_argument (a_target.name))
+			command.append_character (' ')
+			command.append (posix_shell_argument (a_link.name))
+			create environment
+			environment.system (command)
+			check
+				command_succeeded: environment.return_code = 0
+			then
+			end
+		ensure
+			link_exists: entry_exists (a_link)
+		end
+
+	create_hard_link (a_target, a_link: OS_FILE_PATH)
+			-- Create POSIX hard link `a_link` to `a_target`.
+		require
+			supported_platform: not {PLATFORM}.is_windows
+		local
+			command: STRING_32
+			environment: EXECUTION_ENVIRONMENT
+		do
+			create command.make_from_string_general ("ln ")
 			command.append (posix_shell_argument (a_target.name))
 			command.append_character (' ')
 			command.append (posix_shell_argument (a_link.name))

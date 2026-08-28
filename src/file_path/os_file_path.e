@@ -105,6 +105,17 @@ feature -- Status report
 			Result := file_info.exists and then file_info.is_plain
 		end
 
+	is_symbolic_link: BOOLEAN
+			-- Does Current denote a symbolic link, including a broken one?
+		local
+			file_info: FILE_INFO
+		do
+			create file_info.make
+			file_info.set_is_following_symlinks (False)
+			file_info.update (path.name)
+			Result := file_info.exists and then file_info.is_symlink
+		end
+
 	is_empty_directory: BOOLEAN
 			-- Does Current denote a directory without entries?
 		local
@@ -113,6 +124,57 @@ feature -- Status report
 			if is_directory then
 				create directory.make_with_path (path)
 				Result := directory.is_empty
+			end
+		end
+
+	entries: ITERABLE [OS_FILE_PATH]
+			-- Snapshot of the direct children of Current as full paths.
+			-- The iteration order is unspecified.
+		require
+			directory_exists: is_directory
+		local
+			directory: detachable DIRECTORY
+			entry_list: ARRAYED_LIST [OS_FILE_PATH]
+		do
+			create entry_list.make (0)
+			create directory.make_open_read (path.name)
+			from
+				directory.readentry
+			until
+				not attached directory.last_entry_32 as entry_name
+			loop
+				if not entry_name.same_string (".") and then not entry_name.same_string ("..") then
+					entry_list.extend (create {OS_FILE_PATH}.make_from_path (path.extended (entry_name)))
+				end
+				directory.readentry
+			end
+			directory.close
+			Result := entry_list
+		rescue
+			if attached directory as opened_directory and then not opened_directory.is_closed then
+				opened_directory.close
+			end
+		end
+
+	size: NATURAL_64
+			-- Size of Current in bytes.
+		require
+			plain_file: is_plain_file
+		do
+			Result := native.file_size (path)
+		end
+
+	is_executable: BOOLEAN
+			-- Is Current a plain file executable by the current process?
+			-- On Windows, every existing plain file is executable because the
+			-- platform has no corresponding execute permission bit.
+		local
+			file_info: FILE_INFO
+		do
+			if is_plain_file then
+				create file_info.make
+				file_info.update (path.name)
+				Result := file_info.is_executable
 			end
 		end
 
@@ -237,6 +299,99 @@ feature -- Basic operations
 			file_exists: is_plain_file
 		end
 
+	copy_to (a_target: OS_FILE_PATH)
+			-- Copy the bytes of Current to `a_target`, replacing a plain file.
+			-- Leave a possibly partial target if an I/O failure occurs.
+		require
+			source_is_plain_file: is_plain_file
+			source_is_not_symbolic_link: not is_symbolic_link
+			target_is_writable: (not a_target.exists and then not a_target.is_symbolic_link) or else (a_target.is_plain_file and then not a_target.is_symbolic_link)
+		local
+			source_file: detachable RAW_FILE
+			target_file: detachable RAW_FILE
+			target_path: PATH
+		do
+			create target_path.make_from_string (a_target.name)
+			if a_target.exists and then path.is_same_file_as (target_path) then
+				raise_file_system_failure ("Source and copy target denote the same file")
+			end
+			create source_file.make_with_path (path)
+			source_file.open_read
+			create target_file.make_with_path (target_path)
+			target_file.open_write
+			from
+			until
+				not source_file.file_readable
+			loop
+				source_file.read_stream (read_buffer_size)
+				target_file.put_string (source_file.last_string)
+			end
+			source_file.close
+			target_file.close
+		ensure
+			target_is_plain_file: a_target.is_plain_file
+		rescue
+			if attached source_file as opened_source and then not opened_source.is_closed then
+				opened_source.close
+			end
+			if attached target_file as opened_target and then not opened_target.is_closed then
+				opened_target.close
+			end
+		end
+
+	rename_to (a_target: OS_FILE_PATH)
+			-- Rename Current to absent `a_target` using the native operation.
+			-- Do not copy across file systems and do not change `name`.
+		require
+			source_exists: exists or else is_symbolic_link
+			target_is_absent: not a_target.exists and then not a_target.is_symbolic_link
+		local
+			target_path: PATH
+		do
+			create target_path.make_from_string (a_target.name)
+			native.rename_no_replace (path, target_path)
+		ensure
+			source_removed: not exists and then not is_symbolic_link
+			target_created: a_target.exists or else a_target.is_symbolic_link
+		end
+
+	replace_with (a_target: OS_FILE_PATH)
+			-- Rename Current over an absent file, plain file, or symbolic link.
+			-- Replace a symbolic link itself and do not copy across file systems.
+		require
+			source_is_plain_file: is_plain_file
+			source_is_not_symbolic_link: not is_symbolic_link
+			target_is_replaceable: (not a_target.exists and then not a_target.is_symbolic_link) or else a_target.is_plain_file or else a_target.is_symbolic_link
+		local
+			target_path: PATH
+		do
+			create target_path.make_from_string (a_target.name)
+			if a_target.exists and then path.is_same_file_as (target_path) then
+				raise_file_system_failure ("Source and replacement target denote the same file")
+			end
+			native.replace (path, target_path)
+		ensure
+			source_removed: not exists and then not is_symbolic_link
+			target_is_plain_file: a_target.is_plain_file
+		end
+
+	set_executable
+			-- Add the owner execute permission to Current.
+			-- Do nothing on Windows, where there is no execute permission bit.
+		require
+			plain_file: is_plain_file
+			not_symbolic_link: not is_symbolic_link
+		local
+			file: RAW_FILE
+		do
+			if not {PLATFORM}.is_windows then
+				create file.make_with_path (path)
+				file.add_permission ("u", "x")
+			end
+		ensure
+			executable: is_executable
+		end
+
 	delete_recursively
 			-- Delete Current recursively if it exists.
 			-- Delete symbolic links without following them.
@@ -286,6 +441,12 @@ feature {NONE} -- Implementation
 			file_info.set_is_following_symlinks (False)
 			file_info.update (path.name)
 			Result := file_info.exists
+		end
+
+	native: OS_FILE_PATH_NATIVE
+			-- Shared native file-system operations.
+		once
+			create Result
 		end
 
 	decoded_text (a_bytes: READABLE_STRING_8; a_encoding: ENCODING): IMMUTABLE_STRING_32
@@ -418,6 +579,12 @@ feature {NONE} -- Implementation
 
 	raise_conversion_failure (a_message: STRING_8)
 			-- Raise a conversion failure described by `a_message`.
+		do
+			(create {EXCEPTIONS}).raise (a_message)
+		end
+
+	raise_file_system_failure (a_message: STRING_8)
+			-- Raise a file-system failure described by `a_message`.
 		do
 			(create {EXCEPTIONS}).raise (a_message)
 		end

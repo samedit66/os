@@ -156,6 +156,66 @@ feature -- Status report
 			end
 		end
 
+	glob (a_pattern: READABLE_STRING_GENERAL): ITERABLE [OS_FILE_PATH]
+			-- Snapshot of direct children whose names match `a_pattern`.
+			-- Match `*` as zero or more characters and `?` as one character.
+			-- Match all other characters exactly and case-sensitively.
+		require
+			directory_exists: is_directory
+			name_pattern: not a_pattern.has ('/') and then not a_pattern.has ('\')
+		local
+			matches: ARRAYED_LIST [OS_FILE_PATH]
+		do
+			create matches.make (0)
+			across
+				entries
+			as
+				child_path
+			loop
+				if wildcard_matches (path_entry_name (child_path), a_pattern) then
+					matches.extend (child_path)
+				end
+			end
+			Result := matches
+		end
+
+	glob_recursive (a_pattern: READABLE_STRING_GENERAL): ITERABLE [OS_FILE_PATH]
+			-- Snapshot of descendants whose names match `a_pattern`.
+			-- Do not follow symbolic links encountered below Current.
+		require
+			directory_exists: is_directory
+			name_pattern: not a_pattern.has ('/') and then not a_pattern.has ('\')
+		local
+			matches: ARRAYED_LIST [OS_FILE_PATH]
+			directories: ARRAYED_LIST [OS_FILE_PATH]
+			current_directory: OS_FILE_PATH
+		do
+			create matches.make (0)
+			create directories.make (1)
+			directories.extend (Current)
+			from
+			until
+				directories.is_empty
+			loop
+				directories.finish
+				current_directory := directories.item
+				directories.remove
+				across
+					current_directory.entries
+				as
+					child_path
+				loop
+					if wildcard_matches (path_entry_name (child_path), a_pattern) then
+						matches.extend (child_path)
+					end
+					if child_path.is_directory and then not child_path.is_symbolic_link then
+						directories.extend (child_path)
+					end
+				end
+			end
+			Result := matches
+		end
+
 	size: NATURAL_64
 			-- Size of Current in bytes.
 		require
@@ -441,6 +501,58 @@ feature {NONE} -- Implementation
 			file_info.set_is_following_symlinks (False)
 			file_info.update (path.name)
 			Result := file_info.exists
+		end
+
+	path_entry_name (a_path: OS_FILE_PATH): IMMUTABLE_STRING_32
+			-- Final path component of `a_path`.
+		local
+			parsed_path: PATH
+		do
+			create parsed_path.make_from_string (a_path.name)
+			check
+				attached parsed_path.entry as path_entry
+			then
+				Result := path_entry.name
+			end
+		end
+
+	wildcard_matches (a_name, a_pattern: READABLE_STRING_GENERAL): BOOLEAN
+			-- Does `a_name` match the case-sensitive `*` and `?` pattern?
+		local
+			name_index: INTEGER
+			pattern_index: INTEGER
+			star_pattern_index: INTEGER
+			star_name_index: INTEGER
+			failed: BOOLEAN
+		do
+			from
+				name_index := 1
+				pattern_index := 1
+			until
+				name_index > a_name.count or else failed
+			loop
+				if pattern_index <= a_pattern.count and then a_pattern.code (pattern_index) = ('*').natural_32_code then
+					star_pattern_index := pattern_index
+					pattern_index := pattern_index + 1
+					star_name_index := name_index
+				elseif pattern_index <= a_pattern.count and then (a_pattern.code (pattern_index) = ('?').natural_32_code or else a_pattern.code (pattern_index) = a_name.code (name_index)) then
+					pattern_index := pattern_index + 1
+					name_index := name_index + 1
+				elseif star_pattern_index > 0 then
+					star_name_index := star_name_index + 1
+					name_index := star_name_index
+					pattern_index := star_pattern_index + 1
+				else
+					failed := True
+				end
+			end
+			from
+			until
+				pattern_index > a_pattern.count or else a_pattern.code (pattern_index) /= ('*').natural_32_code
+			loop
+				pattern_index := pattern_index + 1
+			end
+			Result := not failed and then name_index > a_name.count and then pattern_index > a_pattern.count
 		end
 
 	native: OS_FILE_PATH_NATIVE

@@ -115,7 +115,14 @@ feature -- Test
 			root.create_directory
 			text_file := root / "message.txt"
 			text_file.write_bytes ("four")
-			create unicode_name.make_from_string_general ("данные.txt")
+			create unicode_name.make (10)
+			unicode_name.append_code (0x0434)
+			unicode_name.append_code (0x0430)
+			unicode_name.append_code (0x043D)
+			unicode_name.append_code (0x043D)
+			unicode_name.append_code (0x044B)
+			unicode_name.append_code (0x0435)
+			unicode_name.append_string_general (".txt")
 			unicode_file := root / unicode_name
 			unicode_file.write_text ("unicode")
 			directory_path := root / "nested"
@@ -225,6 +232,118 @@ feature -- Test
 				assert_text_equal ("replace writes link path", "replacement", symlink.text)
 				assert_text_equal ("replace keeps link target", "keep target", symlink_target.text)
 			end
+		end
+
+	test_glob
+			-- Match direct child names with the minimal portable wildcard syntax.
+		local
+			root: OS_FILE_PATH
+			alpha: OS_FILE_PATH
+			beta: OS_FILE_PATH
+			hidden: OS_FILE_PATH
+			literal_brackets: OS_FILE_PATH
+			unicode_file: OS_FILE_PATH
+			directory_path: OS_FILE_PATH
+			unicode_name: STRING_32
+			unicode_pattern: STRING_32
+			matches: ITERABLE [OS_FILE_PATH]
+		do
+			root := current_test_root
+			root.create_directory
+			alpha := root / "alpha.txt"
+			alpha.write_text ("alpha")
+			beta := root / "beta.e"
+			beta.write_text ("beta")
+			hidden := root / ".hidden"
+			hidden.write_text ("hidden")
+			literal_brackets := root / "literal[1].txt"
+			literal_brackets.write_text ("literal")
+			create unicode_name.make (10)
+			unicode_name.append_code (0x0434)
+			unicode_name.append_code (0x0430)
+			unicode_name.append_code (0x043D)
+			unicode_name.append_code (0x043D)
+			unicode_name.append_code (0x044B)
+			unicode_name.append_code (0x0435)
+			unicode_name.append_string_general (".txt")
+			unicode_file := root / unicode_name
+			unicode_file.write_text ("unicode")
+			directory_path := root / "nested"
+			directory_path.create_directory
+			matches := root.glob ("*.txt")
+			assert_integers_equal ("direct star match count", 3, iterable_count (matches))
+			assert_true ("direct star includes alpha", iterable_has_path (matches, alpha))
+			assert_true ("brackets are literal", iterable_has_path (root.glob ("literal[1].txt"), literal_brackets))
+			assert_false ("question mark matches one character", iterable_has_path (root.glob ("literal?.txt"), literal_brackets))
+			assert_true ("question mark match", iterable_has_path (root.glob ("?eta.e"), beta))
+			assert_true ("star includes dot name", iterable_has_path (root.glob ("*"), hidden))
+			assert_integers_equal ("star includes every direct entry", 6, iterable_count (root.glob ("*")))
+			assert_integers_equal ("case-sensitive glob", 0, iterable_count (root.glob ("*.TXT")))
+			assert_integers_equal ("empty pattern", 0, iterable_count (root.glob ("")))
+			create unicode_pattern.make (9)
+			unicode_pattern.append_code (0x0434)
+			unicode_pattern.append_character ('?')
+			unicode_pattern.append_code (0x043D)
+			unicode_pattern.append_code (0x043D)
+			unicode_pattern.append_code (0x044B)
+			unicode_pattern.append_code (0x0435)
+			unicode_pattern.append_string_general (".*")
+			assert_true ("unicode code-point match", iterable_has_path (root.glob (unicode_pattern), unicode_file))
+			assert_exception ("slash pattern rejected", agent root.glob ("nested/*.txt"))
+			assert_exception ("backslash pattern rejected", agent root.glob ("nested\*.txt"))
+		end
+
+	test_glob_recursive
+			-- Match descendants iteratively without following nested directory links.
+		local
+			root: OS_FILE_PATH
+			top_file: OS_FILE_PATH
+			subdirectory: OS_FILE_PATH
+			child_file: OS_FILE_PATH
+			nested_directory: OS_FILE_PATH
+			deep_file: OS_FILE_PATH
+			real_directory: OS_FILE_PATH
+			real_file: OS_FILE_PATH
+			directory_link: OS_FILE_PATH
+			link_child: OS_FILE_PATH
+			late_file: OS_FILE_PATH
+			snapshot: ITERABLE [OS_FILE_PATH]
+		do
+			root := current_test_root
+			root.create_directory
+			top_file := root / "top.txt"
+			top_file.write_text ("top")
+			subdirectory := root / "sub"
+			subdirectory.create_directory
+			child_file := subdirectory / "child.txt"
+			child_file.write_text ("child")
+			nested_directory := subdirectory / "nested"
+			nested_directory.create_directory
+			deep_file := nested_directory / "deep.txt"
+			deep_file.write_text ("deep")
+			real_directory := root / "real"
+			real_directory.create_directory
+			real_file := real_directory / "inside.txt"
+			real_file.write_text ("inside")
+			if not {PLATFORM}.is_windows then
+				directory_link := root / "directory-link"
+				create_symbolic_link (real_directory, directory_link)
+				link_child := directory_link / "inside.txt"
+			end
+			snapshot := root.glob_recursive ("*.txt")
+			assert_integers_equal ("recursive file count", 4, iterable_count (snapshot))
+			assert_true ("recursive includes top", iterable_has_path (snapshot, top_file))
+			assert_true ("recursive includes child", iterable_has_path (snapshot, child_file))
+			assert_true ("recursive includes deep", iterable_has_path (snapshot, deep_file))
+			assert_true ("recursive includes real path", iterable_has_path (snapshot, real_file))
+			if not {PLATFORM}.is_windows then
+				link_child := (root / "directory-link") / "inside.txt"
+				assert_false ("recursive skips nested symlink directory", iterable_has_path (snapshot, link_child))
+			end
+			assert_true ("recursive includes matching directory", iterable_has_path (root.glob_recursive ("sub"), subdirectory))
+			late_file := nested_directory / "late.txt"
+			late_file.write_text ("late")
+			assert_false ("recursive result is snapshot", iterable_has_path (snapshot, late_file))
 		end
 
 	test_directories_and_files
@@ -396,6 +515,7 @@ feature -- Test
 				assert_true ("directory symlink created", entry_exists (directory_link))
 				assert_true ("directory symlink classified", directory_link.is_symbolic_link)
 				assert_integers_equal ("directory symlink entries", 1, iterable_count (directory_link.entries))
+				assert_integers_equal ("directory symlink recursive root", 1, iterable_count (directory_link.glob_recursive ("*.txt")))
 				directory_link.delete_recursively
 				assert_false ("directory symlink removed", entry_exists (directory_link))
 				assert_true ("symlink target retained", target_file.exists)

@@ -39,6 +39,9 @@ feature {NONE} -- Initialization
 			create executable.make_from_string_general (a_executable)
 			create arguments.make (8)
 			create input.make_empty
+			stdin_mode := stdin_pipe_mode
+			stdout_mode := output_capture_mode
+			stderr_mode := output_capture_mode
 			across
 				a_arguments
 			as
@@ -66,8 +69,78 @@ feature {NONE} -- Initialization
 
 feature -- Change
 
+	capture_stdout
+			-- Capture standard output in the result and make it available to a callback.
+		require
+			can_start: can_start
+		do
+			set_stdout_mode (output_capture_mode)
+		end
+
+	inherit_stdout
+			-- Send standard output directly to Current's inherited destination.
+			-- Inherited bytes are deliberately not buffered in Eiffel memory.
+		require
+			can_start: can_start
+		do
+			set_stdout_mode (output_inherit_mode)
+		end
+
+	discard_stdout
+			-- Send standard output to the platform null device.
+		require
+			can_start: can_start
+		do
+			set_stdout_mode (output_discard_mode)
+		end
+
+	capture_stderr
+			-- Capture standard error separately in the result and callback.
+		require
+			can_start: can_start
+		do
+			set_stderr_mode (output_capture_mode)
+		end
+
+	inherit_stderr
+			-- Send standard error directly to Current's inherited destination.
+			-- Inherited bytes are deliberately not buffered in Eiffel memory.
+		require
+			can_start: can_start
+		do
+			set_stderr_mode (output_inherit_mode)
+		end
+
+	discard_stderr
+			-- Send standard error to the platform null device.
+		require
+			can_start: can_start
+		do
+			set_stderr_mode (output_discard_mode)
+		end
+
+	merge_stderr
+			-- Redirect standard error to the configured standard-output destination.
+			-- When stdout is captured, merged bytes and callbacks belong to stdout;
+			-- there is no separate stderr snapshot or stderr callback.
+		require
+			can_start: can_start
+		do
+			set_stderr_mode (stderr_merge_mode)
+		end
+
+	inherit_stdin
+			-- Connect the child directly to Current's inherited standard input.
+			-- No Eiffel writer is created in this mode.
+		require
+			can_start: can_start
+		do
+			set_stdin_mode (stdin_inherit_mode)
+		end
+
 	set_input (a_input: READABLE_STRING_8)
-			-- Use copied raw bytes as standard input for subsequent executions.
+			-- Use copied raw bytes through a pipe as input for subsequent executions.
+			-- This also switches back from inherited stdin to piped stdin.
 		require
 			can_start: can_start
 		local
@@ -81,6 +154,7 @@ feature -- Change
 				raise_client_failure ("Cannot change input while a command is running")
 			end
 			input := input_copy
+			stdin_mode := stdin_pipe_mode
 			command_mutex.unlock
 			mutex_locked := False
 		ensure
@@ -250,6 +324,10 @@ feature -- Execution
 			-- Start an execution and forward captured output chunks.
 		require
 			can_start: can_start
+			stdout_callback_requires_capture: attached a_stdout implies stdout_is_captured
+			stderr_callback_requires_capture: attached a_stderr implies stderr_is_captured
+				-- Each attached callback must eventually return. A callback executes on
+				-- its stream worker; waiting for it is part of execution completion.
 		local
 			process: OS_PROCESS
 			launch_directory: PATH
@@ -264,9 +342,9 @@ feature -- Execution
 			launch_directory := effective_working_directory_unlocked
 			if environment.has_executable_in (executable, launch_directory) then
 				resolved_executable := environment.executable_path_in (executable, launch_directory)
-				create process.make (resolved_executable, arguments, a_stdout, a_stderr, working_directory, input, environment.entries)
+				create process.make (resolved_executable, arguments, a_stdout, a_stderr, working_directory, input, environment.entries, stdin_mode, stdout_mode, stderr_mode)
 			else
-				create process.make_unresolved (executable)
+				create process.make_unresolved (executable, stdout_mode = output_capture_mode, stderr_mode = output_capture_mode, stderr_mode = stderr_merge_mode)
 			end
 			current_process := process
 			has_started_state := True
@@ -393,6 +471,22 @@ feature -- Access
 
 feature -- Status report
 
+	stdout_is_captured: BOOLEAN
+			-- Will standard output be captured for the next execution?
+		do
+			command_mutex.lock
+			Result := stdout_mode = output_capture_mode
+			command_mutex.unlock
+		end
+
+	stderr_is_captured: BOOLEAN
+			-- Will standard error be captured separately for the next execution?
+		do
+			command_mutex.lock
+			Result := stderr_mode = output_capture_mode
+			command_mutex.unlock
+		end
+
 	has_executable (a_name: READABLE_STRING_GENERAL): BOOLEAN
 			-- Does executable `a_name` resolve for Current?
 			-- A bare name uses Current's PATH on both Unix and Windows. No parent
@@ -455,6 +549,69 @@ feature -- Status report
 		end
 
 feature {NONE} -- State publication
+
+	set_stdin_mode (a_mode: INTEGER)
+			-- Set the native stdin routing mode.
+		require
+			valid_mode: a_mode = stdin_pipe_mode or else a_mode = stdin_inherit_mode
+		local
+			mutex_locked: BOOLEAN
+		do
+			command_mutex.lock
+			mutex_locked := True
+			if not can_start_unlocked then
+				raise_client_failure ("Cannot change stdin while a command is running")
+			end
+			stdin_mode := a_mode
+			command_mutex.unlock
+			mutex_locked := False
+		rescue
+			if mutex_locked then
+				command_mutex.unlock
+			end
+		end
+
+	set_stdout_mode (a_mode: INTEGER)
+			-- Set the native stdout routing mode.
+		require
+			valid_mode: a_mode >= output_capture_mode and then a_mode <= output_discard_mode
+		local
+			mutex_locked: BOOLEAN
+		do
+			command_mutex.lock
+			mutex_locked := True
+			if not can_start_unlocked then
+				raise_client_failure ("Cannot change stdout while a command is running")
+			end
+			stdout_mode := a_mode
+			command_mutex.unlock
+			mutex_locked := False
+		rescue
+			if mutex_locked then
+				command_mutex.unlock
+			end
+		end
+
+	set_stderr_mode (a_mode: INTEGER)
+			-- Set the native stderr routing mode.
+		require
+			valid_mode: a_mode >= output_capture_mode and then a_mode <= stderr_merge_mode
+		local
+			mutex_locked: BOOLEAN
+		do
+			command_mutex.lock
+			mutex_locked := True
+			if not can_start_unlocked then
+				raise_client_failure ("Cannot change stderr while a command is running")
+			end
+			stderr_mode := a_mode
+			command_mutex.unlock
+			mutex_locked := False
+		rescue
+			if mutex_locked then
+				command_mutex.unlock
+			end
+		end
 
 	attached_process: OS_PROCESS
 			-- Current execution process.
@@ -566,6 +723,23 @@ feature {NONE} -- Implementation
 
 	input: STRING_8
 			-- Raw standard-input bytes for subsequent executions.
+
+	stdin_mode: INTEGER
+			-- Native stdin routing mode.
+
+	stdout_mode: INTEGER
+			-- Native stdout routing mode.
+
+	stderr_mode: INTEGER
+			-- Native stderr routing mode.
+
+	stdin_pipe_mode: INTEGER = 0
+	stdin_inherit_mode: INTEGER = 1
+	output_capture_mode: INTEGER = 0
+	output_inherit_mode: INTEGER = 1
+	output_discard_mode: INTEGER = 2
+	stderr_merge_mode: INTEGER = 3
+			-- Values shared with the constants in `subprocess.h`.
 
 	environment: OS_ENVIRONMENT
 			-- Owned variable snapshot and executable resolver.

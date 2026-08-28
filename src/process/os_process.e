@@ -20,18 +20,26 @@ create {OS_COMMAND}
 
 feature {NONE} -- Initialization
 
-	make (a_executable: READABLE_STRING_GENERAL; a_arguments: ITERABLE [READABLE_STRING_GENERAL]; a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_working_directory: detachable READABLE_STRING_GENERAL; a_input: READABLE_STRING_8; a_environment: ITERABLE [READABLE_STRING_GENERAL])
+	make (a_executable: READABLE_STRING_GENERAL; a_arguments: ITERABLE [READABLE_STRING_GENERAL]; a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_working_directory: detachable READABLE_STRING_GENERAL; a_input: READABLE_STRING_8; a_environment: ITERABLE [READABLE_STRING_GENERAL]; a_stdin_mode, a_stdout_mode, a_stderr_mode: INTEGER)
 			-- Launch the native process and its Eiffel pipe workers with `a_environment`.
 			-- Environment entries are encoded as UTF-8 on Unix. On Windows the
 			-- native bridge converts them to a sorted UTF-16 environment block.
+		require
+			valid_stdin_mode: a_stdin_mode = stdin_pipe_mode or else a_stdin_mode = stdin_inherit_mode
+			valid_stdout_mode: a_stdout_mode >= output_capture_mode and then a_stdout_mode <= output_discard_mode
+			valid_stderr_mode: a_stderr_mode >= output_capture_mode and then a_stderr_mode <= stderr_merge_mode
 		do
 			initialize_state
-			launch_process (a_executable, a_arguments, a_stdout, a_stderr, a_working_directory, a_input, a_environment)
+			stdout_was_captured := a_stdout_mode = output_capture_mode
+			stderr_was_captured := a_stderr_mode = output_capture_mode
+			stderr_was_merged := a_stderr_mode = stderr_merge_mode
+			stdin_was_piped := a_stdin_mode = stdin_pipe_mode
+			launch_process (a_executable, a_arguments, a_stdout, a_stderr, a_working_directory, a_input, a_environment, a_stdin_mode, a_stdout_mode, a_stderr_mode)
 		ensure
 			launch_failure_is_terminal: not was_launched implies is_finished
 		end
 
-	make_unresolved (a_executable: READABLE_STRING_GENERAL)
+	make_unresolved (a_executable: READABLE_STRING_GENERAL; a_stdout_was_captured, a_stderr_was_captured, a_stderr_was_merged: BOOLEAN)
 			-- Publish a launch failure because `a_executable` could not be resolved.
 			-- This preserves the same terminal result on Unix and Windows without
 			-- allowing either platform to fall back to the parent process PATH.
@@ -39,6 +47,9 @@ feature {NONE} -- Initialization
 			failure: OS_PROCESS_FAILURE
 		do
 			initialize_state
+			stdout_was_captured := a_stdout_was_captured
+			stderr_was_captured := a_stderr_was_captured
+			stderr_was_merged := a_stderr_was_merged
 			create failure.make (new_launch_kind, "launch", "Cannot resolve executable through command environment")
 			record_failure (failure)
 			process_exited := True
@@ -58,7 +69,7 @@ feature {NONE} -- Initialization
 			create stderr_snapshot.make_empty
 		end
 
-	launch_process (a_executable: READABLE_STRING_GENERAL; a_arguments: ITERABLE [READABLE_STRING_GENERAL]; a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_working_directory: detachable READABLE_STRING_GENERAL; a_input: READABLE_STRING_8; a_environment: ITERABLE [READABLE_STRING_GENERAL])
+	launch_process (a_executable: READABLE_STRING_GENERAL; a_arguments: ITERABLE [READABLE_STRING_GENERAL]; a_stdout: detachable PROCEDURE [READABLE_STRING_8]; a_stderr: detachable PROCEDURE [READABLE_STRING_8]; a_working_directory: detachable READABLE_STRING_GENERAL; a_input: READABLE_STRING_8; a_environment: ITERABLE [READABLE_STRING_GENERAL]; a_stdin_mode, a_stdout_mode, a_stderr_mode: INTEGER)
 			-- Launch after all recovery state has been initialized.
 		local
 			executable_c: C_STRING
@@ -119,7 +130,7 @@ feature {NONE} -- Initialization
 				working_directory_pointer := working_directory_c.item
 			end
 			create error_area.make ({PLATFORM}.integer_32_bytes)
-			native_handle := c_start (executable_c.item, argument_vector.item, environment_vector.item, working_directory_pointer, error_area.item)
+			native_handle := c_start (executable_c.item, argument_vector.item, environment_vector.item, working_directory_pointer, a_stdin_mode, a_stdout_mode, a_stderr_mode, error_area.item)
 			if native_handle = default_pointer then
 				launch_error := error_area.read_integer_32 (0)
 				record_native_failure (new_launch_kind, "launch", "Cannot start process", launch_error)
@@ -127,19 +138,19 @@ feature {NONE} -- Initialization
 				complete
 			else
 				was_launched := True
-				create out_reader.make (native_handle, True, a_stdout)
-				create err_reader.make (native_handle, False, a_stderr)
-				create in_writer.make (native_handle, a_input)
-				stdout_reader := out_reader
-				stderr_reader := err_reader
-				stdin_writer := in_writer
-				out_reader.launch
-				if out_reader.is_last_launch_successful then
-					stdout_reader_launched := True
-				else
-					record_worker_initialization_failure ("initialize stdout worker")
+				if stdout_was_captured then
+					create out_reader.make (native_handle, True, a_stdout)
+					stdout_reader := out_reader
+					out_reader.launch
+					if out_reader.is_last_launch_successful then
+						stdout_reader_launched := True
+					else
+						record_worker_initialization_failure ("initialize stdout worker")
+					end
 				end
-				if not has_worker_initialization_failure then
+				if stderr_was_captured and then not has_worker_initialization_failure then
+					create err_reader.make (native_handle, False, a_stderr)
+					stderr_reader := err_reader
 					err_reader.launch
 					if err_reader.is_last_launch_successful then
 						stderr_reader_launched := True
@@ -147,7 +158,9 @@ feature {NONE} -- Initialization
 						record_worker_initialization_failure ("initialize stderr worker")
 					end
 				end
-				if not has_worker_initialization_failure then
+				if stdin_was_piped and then not has_worker_initialization_failure then
+					create in_writer.make (native_handle, a_input)
+					stdin_writer := in_writer
 					in_writer.launch
 					if in_writer.is_last_launch_successful then
 						stdin_writer_launched := True
@@ -296,7 +309,7 @@ feature {NONE} -- Completion
 			status: INTEGER
 		do
 			if was_launched and then native_handle /= default_pointer then
-				if not stdin_writer_launched then
+				if stdin_was_piped and then not stdin_writer_launched then
 					status := c_close_stdin (native_handle)
 					if status /= 0 then
 						record_native_failure (new_stdin_close_kind, "close stdin during initialization rollback", "Cannot close standard input during initialization rollback", status)
@@ -423,7 +436,7 @@ feature {NONE} -- Completion
 					native_handle := default_pointer
 				end
 				result_failures := failure_snapshot
-				create completed_result.make (was_launched, was_launched and process_exited, exit_status, stdout_snapshot, stderr_snapshot, result_failures)
+				create completed_result.make (was_launched, was_launched and process_exited, exit_status, stdout_was_captured, stderr_was_captured, stderr_was_merged, False, False, False, stdout_snapshot, stderr_snapshot, result_failures)
 				state_mutex.lock
 				process_execution_result := completed_result
 				finished := True
@@ -634,7 +647,7 @@ feature {NONE} -- Exceptional invariant recovery
 
 feature {NONE} -- Native bridge
 
-	c_start (a_executable, a_arguments, a_environment, a_working_directory, a_error: POINTER): POINTER
+	c_start (a_executable, a_arguments, a_environment, a_working_directory: POINTER; a_stdin_mode, a_stdout_mode, a_stderr_mode: INTEGER; a_error: POINTER): POINTER
 		external
 			"C use <subprocess.h>"
 		alias
@@ -702,6 +715,22 @@ feature {NONE} -- Implementation
 	stdout_snapshot: STRING_8
 
 	stderr_snapshot: STRING_8
+
+	stdin_was_piped: BOOLEAN
+
+	stdout_was_captured: BOOLEAN
+
+	stderr_was_captured: BOOLEAN
+
+	stderr_was_merged: BOOLEAN
+
+	stdin_pipe_mode: INTEGER = 0
+	stdin_inherit_mode: INTEGER = 1
+	output_capture_mode: INTEGER = 0
+	output_inherit_mode: INTEGER = 1
+	output_discard_mode: INTEGER = 2
+	stderr_merge_mode: INTEGER = 3
+			-- Values shared with the constants in `subprocess.h`.
 
 	process_execution_result: detachable OS_PROCESS_EXECUTION_RESULT
 

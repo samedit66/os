@@ -216,6 +216,69 @@ feature -- Test
 			assert_integers_equal ("large stderr", large_block_size * large_block_count, process_result.stderr.count)
 		end
 
+	test_default_stdio_is_captured
+			-- Preserve the historical captured-output defaults explicitly.
+		local
+			command: OS_COMMAND
+			process_result: OS_PROCESS_EXECUTION_RESULT
+		do
+			create command.make (process_child_executable, child_arguments ("emit"))
+			command.run
+			process_result := command.execution_result
+			assert_true ("default stdout captured", process_result.stdout_was_captured)
+			assert_true ("default stderr captured", process_result.stderr_was_captured)
+			assert_false ("default stderr separate", process_result.stderr_was_merged)
+			assert_readable_strings_equal ("default stdout", "stdout-data", process_result.stdout)
+			assert_readable_strings_equal ("default stderr", "stderr-data", process_result.stderr)
+		end
+
+	test_discard_output
+			-- Avoid creating capture pipes or retaining discarded output.
+		local
+			command: OS_COMMAND
+			process_result: OS_PROCESS_EXECUTION_RESULT
+		do
+			create command.make (process_child_executable, child_arguments ("emit"))
+			command.discard_stdout
+			command.discard_stderr
+			command.run
+			process_result := command.execution_result
+			assert_true ("discard execution successful", process_result.successful)
+			assert_false ("stdout not captured", process_result.stdout_was_captured)
+			assert_false ("stderr not captured", process_result.stderr_was_captured)
+			assert_false ("stderr not merged", process_result.stderr_was_merged)
+		end
+
+	test_merge_stderr_into_captured_stdout
+			-- Read both native streams through the sole stdout capture pipe.
+		local
+			command: OS_COMMAND
+			process_result: OS_PROCESS_EXECUTION_RESULT
+		do
+			create command.make (process_child_executable, child_arguments ("emit"))
+			command.merge_stderr
+			command.run
+			process_result := command.execution_result
+			assert_true ("merged execution successful", process_result.successful)
+			assert_true ("merged stdout captured", process_result.stdout_was_captured)
+			assert_false ("merged stderr not separate", process_result.stderr_was_captured)
+			assert_true ("merged stderr flagged", process_result.stderr_was_merged)
+			assert_true ("merged stdout bytes", process_result.stdout.has_substring ("stdout-data"))
+			assert_true ("merged stderr bytes", process_result.stdout.has_substring ("stderr-data"))
+		end
+
+	test_set_input_restores_piped_stdin
+			-- Let `set_input` override an earlier inherited-stdin selection.
+		local
+			command: OS_COMMAND
+		do
+			create command.make (process_child_executable, child_arguments ("echo-input"))
+			command.inherit_stdin
+			command.set_input ("piped-after-inherit")
+			command.run
+			assert_readable_strings_equal ("restored pipe input", "piped-after-inherit", command.execution_result.stdout)
+		end
+
 	test_default_input_is_eof
 			-- Close standard input immediately when no bytes are configured.
 		local

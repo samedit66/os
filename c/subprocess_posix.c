@@ -104,6 +104,7 @@ static int decoded_exit_code(int status)
 
 os_process *os_process_start(const char *executable, char *const arguments[],
                              char *const environment[], const char *working_directory,
+                             int stdin_mode, int stdout_mode, int stderr_mode,
                              int *error_code)
 {
     int stdin_pipe[2] = {-1, -1};
@@ -119,43 +120,58 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     {
         *error_code = 0;
     }
-    if (executable == NULL || arguments == NULL || environment == NULL || error_code == NULL)
+    if (executable == NULL || arguments == NULL || environment == NULL || error_code == NULL ||
+        (stdin_mode != OS_PROCESS_STDIN_PIPE && stdin_mode != OS_PROCESS_STDIN_INHERIT) ||
+        (stdout_mode != OS_PROCESS_OUTPUT_CAPTURE &&
+         stdout_mode != OS_PROCESS_OUTPUT_INHERIT && stdout_mode != OS_PROCESS_OUTPUT_DISCARD) ||
+        (stderr_mode != OS_PROCESS_OUTPUT_CAPTURE &&
+         stderr_mode != OS_PROCESS_OUTPUT_INHERIT &&
+         stderr_mode != OS_PROCESS_OUTPUT_DISCARD && stderr_mode != OS_PROCESS_STDERR_MERGE))
     {
         return NULL;
     }
-    if (pipe(stdin_pipe) != 0)
+    if (stdin_mode == OS_PROCESS_STDIN_PIPE && pipe(stdin_pipe) != 0)
     {
         result = errno;
         goto fail;
     }
-    if (pipe(stdout_pipe) != 0)
+    if (stdout_mode == OS_PROCESS_OUTPUT_CAPTURE && pipe(stdout_pipe) != 0)
     {
         result = errno;
         goto fail;
     }
-    if (pipe(stderr_pipe) != 0)
+    if (stderr_mode == OS_PROCESS_OUTPUT_CAPTURE && pipe(stderr_pipe) != 0)
     {
         result = errno;
         goto fail;
     }
-    result = set_close_on_exec(stdin_pipe[0]);
-    if (result != 0)
-        goto fail;
-    result = set_close_on_exec(stdin_pipe[1]);
-    if (result != 0)
-        goto fail;
-    result = set_close_on_exec(stdout_pipe[0]);
-    if (result != 0)
-        goto fail;
-    result = set_close_on_exec(stdout_pipe[1]);
-    if (result != 0)
-        goto fail;
-    result = set_close_on_exec(stderr_pipe[0]);
-    if (result != 0)
-        goto fail;
-    result = set_close_on_exec(stderr_pipe[1]);
-    if (result != 0)
-        goto fail;
+    if (stdin_mode == OS_PROCESS_STDIN_PIPE)
+    {
+        result = set_close_on_exec(stdin_pipe[0]);
+        if (result != 0)
+            goto fail;
+        result = set_close_on_exec(stdin_pipe[1]);
+        if (result != 0)
+            goto fail;
+    }
+    if (stdout_mode == OS_PROCESS_OUTPUT_CAPTURE)
+    {
+        result = set_close_on_exec(stdout_pipe[0]);
+        if (result != 0)
+            goto fail;
+        result = set_close_on_exec(stdout_pipe[1]);
+        if (result != 0)
+            goto fail;
+    }
+    if (stderr_mode == OS_PROCESS_OUTPUT_CAPTURE)
+    {
+        result = set_close_on_exec(stderr_pipe[0]);
+        if (result != 0)
+            goto fail;
+        result = set_close_on_exec(stderr_pipe[1]);
+        if (result != 0)
+            goto fail;
+    }
 
     result = posix_spawn_file_actions_init(&actions);
     if (result != 0)
@@ -168,15 +184,40 @@ os_process *os_process_start(const char *executable, char *const arguments[],
         if (result != 0)                                                                           \
             goto fail;                                                                             \
     } while (0)
-    ADD_ACTION(posix_spawn_file_actions_adddup2(&actions, stdin_pipe[0], STDIN_FILENO));
-    ADD_ACTION(posix_spawn_file_actions_adddup2(&actions, stdout_pipe[1], STDOUT_FILENO));
-    ADD_ACTION(posix_spawn_file_actions_adddup2(&actions, stderr_pipe[1], STDERR_FILENO));
-    ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdin_pipe[1]));
-    ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdout_pipe[0]));
-    ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stderr_pipe[0]));
-    ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdin_pipe[0]));
-    ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdout_pipe[1]));
-    ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stderr_pipe[1]));
+    if (stdin_mode == OS_PROCESS_STDIN_PIPE)
+    {
+        ADD_ACTION(posix_spawn_file_actions_adddup2(&actions, stdin_pipe[0], STDIN_FILENO));
+        ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdin_pipe[1]));
+        ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdin_pipe[0]));
+    }
+    if (stdout_mode == OS_PROCESS_OUTPUT_CAPTURE)
+    {
+        ADD_ACTION(posix_spawn_file_actions_adddup2(&actions, stdout_pipe[1], STDOUT_FILENO));
+        ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdout_pipe[0]));
+        ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stdout_pipe[1]));
+    }
+    else if (stdout_mode == OS_PROCESS_OUTPUT_DISCARD)
+    {
+        ADD_ACTION(posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null",
+                                                    O_WRONLY, 0));
+    }
+    if (stderr_mode == OS_PROCESS_OUTPUT_CAPTURE)
+    {
+        ADD_ACTION(posix_spawn_file_actions_adddup2(&actions, stderr_pipe[1], STDERR_FILENO));
+        ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stderr_pipe[0]));
+        ADD_ACTION(posix_spawn_file_actions_addclose(&actions, stderr_pipe[1]));
+    }
+    else if (stderr_mode == OS_PROCESS_OUTPUT_DISCARD)
+    {
+        ADD_ACTION(posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null",
+                                                    O_WRONLY, 0));
+    }
+    else if (stderr_mode == OS_PROCESS_STDERR_MERGE)
+    {
+        /* Merge after configuring stdout so stderr follows the selected stdout
+           destination, including a capture pipe. */
+        ADD_ACTION(posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO));
+    }
     if (working_directory != NULL)
     {
         ADD_ACTION(add_working_directory_action(&actions, working_directory));
@@ -205,6 +246,9 @@ os_process *os_process_start(const char *executable, char *const arguments[],
         goto fail;
     }
     process->pid = pid;
+    process->stdin_fd = -1;
+    process->stdout_fd = -1;
+    process->stderr_fd = -1;
     process->stdin_fd = stdin_pipe[1];
     process->stdout_fd = stdout_pipe[0];
     process->stderr_fd = stderr_pipe[0];

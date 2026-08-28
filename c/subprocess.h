@@ -8,6 +8,20 @@ extern "C"
 
     typedef struct os_process os_process;
 
+    enum
+    {
+        OS_PROCESS_STDIN_PIPE = 0,
+        OS_PROCESS_STDIN_INHERIT = 1
+    };
+
+    enum
+    {
+        OS_PROCESS_OUTPUT_CAPTURE = 0,
+        OS_PROCESS_OUTPUT_INHERIT = 1,
+        OS_PROCESS_OUTPUT_DISCARD = 2,
+        OS_PROCESS_STDERR_MERGE = 3
+    };
+
     /*
      * Return an allocated UTF-8 copy of environment entry index, or NULL when
      * index is past the end. The caller owns a non-NULL result and releases it
@@ -26,6 +40,7 @@ extern "C"
      */
     os_process *os_process_start(const char *executable, char *const arguments[],
                                  char *const environment[], const char *working_directory,
+                                 int stdin_mode, int stdout_mode, int stderr_mode,
                                  int *error_code);
 
     /*

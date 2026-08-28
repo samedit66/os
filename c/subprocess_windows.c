@@ -275,18 +275,43 @@ static void close_handle(HANDLE *handle)
     }
 }
 
+static int duplicate_inheritable(HANDLE source, HANDLE *result)
+{
+    if (source == NULL || source == INVALID_HANDLE_VALUE)
+        return ERROR_INVALID_HANDLE;
+    if (!DuplicateHandle(GetCurrentProcess(), source, GetCurrentProcess(), result, 0, TRUE,
+                         DUPLICATE_SAME_ACCESS))
+        return error_as_int(GetLastError());
+    return 0;
+}
+
+static int append_unique_handle(HANDLE handles[], SIZE_T *count, HANDLE handle)
+{
+    SIZE_T index;
+    for (index = 0; index < *count; ++index)
+    {
+        if (handles[index] == handle)
+            return 1;
+    }
+    handles[(*count)++] = handle;
+    return 1;
+}
+
 os_process *os_process_start(const char *executable, char *const arguments[],
                              char *const environment[], const char *working_directory,
+                             int stdin_mode, int stdout_mode, int stderr_mode,
                              int *error_code)
 {
     SECURITY_ATTRIBUTES security = {sizeof(security), NULL, TRUE};
     HANDLE stdout_read = NULL, stdout_write = NULL;
     HANDLE stderr_read = NULL, stderr_write = NULL;
     HANDLE stdin_read = NULL, stdin_write = NULL;
+    HANDLE child_stdin = NULL, child_stdout = NULL, child_stderr = NULL;
     STARTUPINFOEXW startup = {0};
     PROCESS_INFORMATION information = {0};
     SIZE_T attributes_size = 0;
     HANDLE inherited[3];
+    SIZE_T inherited_count = 0;
     wchar_t *command_line = NULL;
     wchar_t *application_name = NULL;
     wchar_t *environment_block = NULL;
@@ -297,7 +322,13 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     if (error_code == NULL)
         return NULL;
     *error_code = 0;
-    if (executable == NULL || arguments == NULL || environment == NULL)
+    if (executable == NULL || arguments == NULL || environment == NULL ||
+        (stdin_mode != OS_PROCESS_STDIN_PIPE && stdin_mode != OS_PROCESS_STDIN_INHERIT) ||
+        (stdout_mode != OS_PROCESS_OUTPUT_CAPTURE &&
+         stdout_mode != OS_PROCESS_OUTPUT_INHERIT && stdout_mode != OS_PROCESS_OUTPUT_DISCARD) ||
+        (stderr_mode != OS_PROCESS_OUTPUT_CAPTURE &&
+         stderr_mode != OS_PROCESS_OUTPUT_INHERIT &&
+         stderr_mode != OS_PROCESS_OUTPUT_DISCARD && stderr_mode != OS_PROCESS_STDERR_MERGE))
     {
         *error_code = ERROR_INVALID_PARAMETER;
         return NULL;
@@ -317,25 +348,89 @@ os_process *os_process_start(const char *executable, char *const arguments[],
         if (working_directory_wide == NULL)
             goto fail;
     }
-    if (!CreatePipe(&stdin_read, &stdin_write, &security, 0) ||
-        !SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0) ||
-        !CreatePipe(&stdout_read, &stdout_write, &security, 0) ||
-        !SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0) ||
-        !CreatePipe(&stderr_read, &stderr_write, &security, 0) ||
-        !SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0))
+    if (stdin_mode == OS_PROCESS_STDIN_PIPE)
     {
-        windows_error = GetLastError();
-        goto fail;
+        if (!CreatePipe(&stdin_read, &stdin_write, &security, 0) ||
+            !SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0))
+        {
+            windows_error = GetLastError();
+            goto fail;
+        }
+        child_stdin = stdin_read;
+    }
+    else
+    {
+        windows_error = (DWORD)duplicate_inheritable(GetStdHandle(STD_INPUT_HANDLE), &child_stdin);
+        if (windows_error != ERROR_SUCCESS)
+            goto fail;
+    }
+    if (stdout_mode == OS_PROCESS_OUTPUT_CAPTURE)
+    {
+        if (!CreatePipe(&stdout_read, &stdout_write, &security, 0) ||
+            !SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0))
+        {
+            windows_error = GetLastError();
+            goto fail;
+        }
+        child_stdout = stdout_write;
+    }
+    else if (stdout_mode == OS_PROCESS_OUTPUT_INHERIT)
+    {
+        windows_error = (DWORD)duplicate_inheritable(GetStdHandle(STD_OUTPUT_HANDLE), &child_stdout);
+        if (windows_error != ERROR_SUCCESS)
+            goto fail;
+    }
+    else
+    {
+        child_stdout = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                   &security, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (child_stdout == INVALID_HANDLE_VALUE)
+        {
+            child_stdout = NULL;
+            windows_error = GetLastError();
+            goto fail;
+        }
+    }
+    if (stderr_mode == OS_PROCESS_OUTPUT_CAPTURE)
+    {
+        if (!CreatePipe(&stderr_read, &stderr_write, &security, 0) ||
+            !SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0))
+        {
+            windows_error = GetLastError();
+            goto fail;
+        }
+        child_stderr = stderr_write;
+    }
+    else if (stderr_mode == OS_PROCESS_OUTPUT_INHERIT)
+    {
+        windows_error = (DWORD)duplicate_inheritable(GetStdHandle(STD_ERROR_HANDLE), &child_stderr);
+        if (windows_error != ERROR_SUCCESS)
+            goto fail;
+    }
+    else if (stderr_mode == OS_PROCESS_OUTPUT_DISCARD)
+    {
+        child_stderr = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                   &security, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (child_stderr == INVALID_HANDLE_VALUE)
+        {
+            child_stderr = NULL;
+            windows_error = GetLastError();
+            goto fail;
+        }
+    }
+    else
+    {
+        child_stderr = child_stdout;
     }
     ZeroMemory(&startup, sizeof(startup));
     startup.StartupInfo.cb = sizeof(startup);
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startup.StartupInfo.hStdInput = stdin_read;
-    startup.StartupInfo.hStdOutput = stdout_write;
-    startup.StartupInfo.hStdError = stderr_write;
-    inherited[0] = stdin_read;
-    inherited[1] = stdout_write;
-    inherited[2] = stderr_write;
+    startup.StartupInfo.hStdInput = child_stdin;
+    startup.StartupInfo.hStdOutput = child_stdout;
+    startup.StartupInfo.hStdError = child_stderr;
+    append_unique_handle(inherited, &inherited_count, child_stdin);
+    append_unique_handle(inherited, &inherited_count, child_stdout);
+    append_unique_handle(inherited, &inherited_count, child_stderr);
     (void)InitializeProcThreadAttributeList(NULL, 1, 0, &attributes_size);
     startup.lpAttributeList = (PPROC_THREAD_ATTRIBUTE_LIST)malloc(attributes_size);
     if (startup.lpAttributeList == NULL)
@@ -345,7 +440,7 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     }
     if (!InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &attributes_size) ||
         !UpdateProcThreadAttribute(startup.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-                                   inherited, sizeof(inherited), NULL, NULL))
+                                   inherited, inherited_count * sizeof(HANDLE), NULL, NULL))
     {
         windows_error = GetLastError();
         goto fail;
@@ -364,9 +459,15 @@ os_process *os_process_start(const char *executable, char *const arguments[],
         goto fail;
     }
     (void)CloseHandle(information.hThread);
-    close_handle(&stdout_write);
-    close_handle(&stderr_write);
-    close_handle(&stdin_read);
+    if (child_stderr == child_stdout)
+        child_stderr = NULL;
+    else
+        close_handle(&child_stderr);
+    close_handle(&child_stdout);
+    close_handle(&child_stdin);
+    stdout_write = NULL;
+    stderr_write = NULL;
+    stdin_read = NULL;
     process = (os_process *)calloc(1, sizeof(*process));
     if (process == NULL)
     {
@@ -396,11 +497,14 @@ fail:
     free(environment_block);
     free(working_directory_wide);
     close_handle(&stdout_read);
-    close_handle(&stdout_write);
     close_handle(&stderr_read);
-    close_handle(&stderr_write);
-    close_handle(&stdin_read);
     close_handle(&stdin_write);
+    if (child_stderr == child_stdout)
+        child_stderr = NULL;
+    else
+        close_handle(&child_stderr);
+    close_handle(&child_stdout);
+    close_handle(&child_stdin);
     if (process == NULL && windows_error != ERROR_SUCCESS)
     {
         *error_code = error_as_int(windows_error);

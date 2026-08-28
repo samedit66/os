@@ -194,17 +194,7 @@ feature {OS_PROCESS_FAILURE_KIND} -- Implementation
 
 feature {NONE} -- Constants
 
-	launch_code,
-	stdin_write_code,
-	stdin_close_code,
-	stdout_read_code,
-	stderr_read_code,
-	stdout_handler_code,
-	stderr_handler_code,
-	poll_code,
-	wait_code,
-	termination_code,
-	worker_initialization_code: INTEGER = unique
+	launch_code, stdin_write_code, stdin_close_code, stdout_read_code, stderr_read_code, stdout_handler_code, stderr_handler_code, poll_code, wait_code, termination_code, worker_initialization_code: INTEGER = unique
 
 invariant
 

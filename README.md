@@ -235,15 +235,14 @@ make ise        # build and run the example with EiffelStudio
 make test       # run the shared test suite with both compilers
 make test-ise-finalized  # run the EiffelStudio suite as a finalized build
 make check      # run gelint and the EiffelStudio Code Analyzer
+make format     # format tracked Eiffel sources with gedoc
 make ccheck     # analyze the handwritten C bridge with clang-tidy
 make cformat    # format the handwritten C bridge with clang-format
 ```
 
-Eiffel formatting is intentionally not automated because the available Gobo
-and EiffelStudio formatters can corrupt valid source code. Source lists, ECF
-targets, compiler flags, individual test targets, and tool paths can be
-overridden through variables defined in the [`Makefile`](Makefile). CI runs the
-shared suite on Ubuntu, macOS, and Windows.
+Source lists, ECF targets, compiler flags, individual test targets, and tool
+paths can be overridden through variables defined in the [`Makefile`](Makefile).
+CI runs the shared suite on Ubuntu, macOS, and Windows.
 
 ## Scope
 

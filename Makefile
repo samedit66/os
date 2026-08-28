@@ -2,6 +2,7 @@ GOBO ?= $(HOME)/Projects/gobo
 GEC ?= $(GOBO)/bin/gec
 GELINT ?= $(GOBO)/bin/gelint
 GETEST ?= $(GOBO)/bin/getest
+GEDOC ?= $(GOBO)/bin/gedoc
 EC ?= ec
 CC ?= cc
 AR ?= ar
@@ -19,12 +20,14 @@ GOBO_FLAGS = --variable=GOBO_EIFFEL=ge --ise=25.12 --gelint
 ISE_TEST_FLAGS ?=
 ISE_TEST_CODE_DIR ?= W_code
 EIFFEL_TARGETS ?= file_path.ecf@os_file_path process.ecf@os_process os.ecf@application
+EIFFEL_FORMAT_SOURCES ?= $(shell git ls-files '*.e')
+EIFFEL_FORMAT_EXCLUDES ?= tests/file_path/os_file_path_tests.e
 C_FORMAT_SOURCES ?= $(wildcard c/*.c c/*.h)
 C_CHECK_SOURCES ?= c/subprocess_posix.c
 C_CHECK_FLAGS ?= -std=c11 -I c
 CLANG_TIDY_CHECKS ?= -*,clang-analyzer-*,bugprone-*,cert-*,portability-*,-bugprone-reserved-identifier,-cert-dcl37-c,-cert-dcl51-cpp
 
-.PHONY: all native check check-gobo check-ise \
+.PHONY: all native check check-gobo check-ise format \
 	ccheck cformat gobo ise test generate-tests generate-file-path-tests \
 	generate-process-tests generate-os-tests test-gobo test-ise \
 	test-file-path-gobo test-process-gobo test-os-gobo \
@@ -57,6 +60,14 @@ check-ise:
 		ecf=$${system%@*}; target=$${system#*@}; \
 		GOBO="$(GOBO)" GOBO_EIFFEL=ise $(EC) -batch -config "$$ecf" \
 			-target "$$target" -ca_default -ca_class -all; \
+	done
+
+format:
+	@set -e; formatter="$(abspath $(GEDOC))"; \
+	for source in $(filter-out $(EIFFEL_FORMAT_EXCLUDES),$(EIFFEL_FORMAT_SOURCES)); do \
+		directory=$${source%/*}; filename=$${source##*/}; \
+		(cd "$$directory" && GOBO="$(GOBO)" GOBO_EIFFEL=ge \
+			"$$formatter" --silent --force "$$filename"); \
 	done
 
 ccheck:

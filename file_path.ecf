@@ -17,6 +17,17 @@
         <library name="ise_base" location="$ISE_LIBRARY/library/base/base.ecf">
             <condition><custom name="GOBO_EIFFEL" excluded_value="ge"/></condition>
         </library>
+        <external_include location="$ECF_CONFIG_PATH/c"/>
+        <external_library location="$ECF_CONFIG_PATH/build/native/libos_file_path.a">
+            <condition>
+                <platform excluded_value="windows"/>
+            </condition>
+        </external_library>
+        <external_library location="$ECF_CONFIG_PATH/build/native/os_file_path.lib">
+            <condition>
+                <platform value="windows"/>
+            </condition>
+        </external_library>
         <cluster name="file_path" location="src/file_path" recursive="false"/>
     </target>
     <target name="os_file_path_tests" extends="os_file_path">

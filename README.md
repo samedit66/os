@@ -29,10 +29,12 @@ with EiffelStudio and Gobo Eiffel on Linux, macOS, and Windows.
 | [`OS_PROCESS_FAILURE`](src/process/os_process_failure.e) | Inspect one portable process-library failure and its optional native code |
 | [`OS_FILE_PATH`](src/file_path/os_file_path.e) | Compose and inspect paths and perform common file and directory operations |
 
-Both Eiffel compilers use the same native C11 process backend. The platform
-implementations are in [`subprocess_posix.c`](c/subprocess_posix.c) and
-[`subprocess_windows.c`](c/subprocess_windows.c). Path operations use the
-common EiffelBase/FreeELKS file-system classes.
+Both Eiffel compilers use the same native C11 backends. Process integration is
+implemented in [`subprocess_posix.c`](c/subprocess_posix.c) and
+[`subprocess_windows.c`](c/subprocess_windows.c); file-system operations that
+need stable cross-compiler semantics are implemented in
+[`file_path_posix.c`](c/file_path_posix.c) and
+[`file_path_windows.c`](c/file_path_windows.c).
 
 ## Installation
 
@@ -50,8 +52,8 @@ Reference the complete package from the consuming project's ECF file:
 ```
 
 The umbrella configuration imports both public modules. Clients that need only
-file and path operations can avoid the thread library, native archive, and C
-toolchain by importing `file_path.ecf` directly:
+file and path operations can avoid the thread library and process backend by
+importing `file_path.ecf` directly:
 
 ```xml
 <library name="os_file_path" location="./vendor/os/file_path.ecf" readonly="true"/>
@@ -63,12 +65,14 @@ Process-only clients can import `process.ecf`:
 <library name="os_process" location="./vendor/os/process.ecf" readonly="true"/>
 ```
 
-The process module and the complete package require the native process
-library. Build it on Linux or macOS before compiling the client:
+The public modules use separate native archives. Build both on Linux or macOS
+before compiling the complete package:
 
 ```console
 make -C vendor/os native
 ```
+
+For a single module, use `native-file-path` or `native-process` instead.
 
 On Windows, use a Visual Studio developer command prompt:
 
@@ -166,10 +170,22 @@ do
 end
 ```
 
-`OS_FILE_PATH` also provides `exists`, `is_directory`, `is_plain_file`,
-`is_empty_directory`, `parent`, `normalized_absolute_path`, `bytes`,
-`write_bytes`, and `delete_recursively`. Recursive deletion removes a symbolic
-link itself rather than following its target.
+`OS_FILE_PATH` also provides status and metadata queries (`exists`,
+`is_directory`, `is_plain_file`, `is_symbolic_link`, `is_empty_directory`,
+`size`, and `is_executable`), snapshot traversal (`entries`, `glob`, and
+`glob_recursive`), byte and encoded-text access, and native `copy_to`,
+`rename_to`, and `replace_with` operations. `set_executable` adds the owner
+execute bit on POSIX and is an idempotent no-op on Windows.
+
+`glob` matches direct child names; `glob_recursive` matches descendant names
+without following directory symlinks below its root. Their portable pattern
+syntax deliberately contains only case-sensitive `*` and `?`; separators,
+`**`, character classes, and escapes are not supported.
+
+`rename_to` requires an absent destination and does not fall back to copying
+between file systems. `replace_with` replaces an absent file, plain file, or
+symbolic link with a plain source file. Recursive deletion and replacement both
+operate on a symbolic link itself rather than following its target.
 
 `text` and `write_text` use strict UTF-8 without automatic byte-order-mark
 detection. Use an explicit `ENCODING` for another character set:

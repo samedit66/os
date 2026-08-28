@@ -43,8 +43,7 @@ int os_file_path_rename_no_replace(const os_file_path_character *source,
     return status == 0 ? 0 : errno;
 }
 
-int os_file_path_replace(const os_file_path_character *source,
-                         const os_file_path_character *target)
+int os_file_path_replace(const os_file_path_character *source, const os_file_path_character *target)
 {
     int status;
     if (source == NULL || target == NULL)

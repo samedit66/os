@@ -22,8 +22,7 @@ int os_file_path_rename_no_replace(const os_file_path_character *source,
     return error_as_int(GetLastError());
 }
 
-int os_file_path_replace(const os_file_path_character *source,
-                         const os_file_path_character *target)
+int os_file_path_replace(const os_file_path_character *source, const os_file_path_character *target)
 {
     if (source == NULL || target == NULL)
         return ERROR_INVALID_PARAMETER;

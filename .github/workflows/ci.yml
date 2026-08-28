@@ -99,6 +99,10 @@ jobs:
       - name: Build and test
         if: runner.os != 'Windows'
         run: make test-gobo
+      - name: Build native libraries
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: .github\scripts\build-windows-c.cmd msvc library
       - name: Compile file path tests
         if: runner.os == 'Windows'
         shell: cmd
@@ -117,10 +121,6 @@ jobs:
         run: |
           & .\os_file_path_tests.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Build native library
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: .github\scripts\build-windows-c.cmd msvc library
       - name: Compile process and facade tests
         if: runner.os == 'Windows'
         shell: cmd
@@ -190,6 +190,10 @@ jobs:
       - name: Compile and test
         if: runner.os != 'Windows'
         run: make test-ise
+      - name: Build native libraries
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: .github\scripts\build-windows-c.cmd msvc library
       - name: Compile file path tests
         if: runner.os == 'Windows'
         shell: cmd
@@ -207,10 +211,6 @@ jobs:
         run: |
           & .\EIFGENs\os_file_path_tests\W_code\os_file_path_tests.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Build native library
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: .github\scripts\build-windows-c.cmd msvc library
       - name: Compile process and facade tests
         if: runner.os == 'Windows'
         shell: cmd

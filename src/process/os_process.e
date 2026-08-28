@@ -848,10 +848,15 @@ feature {NONE} -- Implementation
 	timeout_milliseconds: INTEGER
 
 	stdin_pipe_mode: INTEGER = 0
+
 	stdin_inherit_mode: INTEGER = 1
+
 	output_capture_mode: INTEGER = 0
+
 	output_inherit_mode: INTEGER = 1
+
 	output_discard_mode: INTEGER = 2
+
 	stderr_merge_mode: INTEGER = 3
 			-- Values shared with the constants in `subprocess.h`.
 

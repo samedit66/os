@@ -51,20 +51,17 @@ struct os_process
 char *os_environment_entry(int index, int *error_code)
 {
     char *result;
-    size_t count;
     if (index < 0 || error_code == NULL)
         return NULL;
     *error_code = 0;
     if (environ == NULL || environ[index] == NULL)
         return NULL;
-    count = strlen(environ[index]) + 1;
-    result = (char *)malloc(count);
+    result = strdup(environ[index]);
     if (result == NULL)
     {
         *error_code = ENOMEM;
         return NULL;
     }
-    memcpy(result, environ[index], count);
     return result;
 }
 
@@ -487,14 +484,14 @@ static int write_fd_without_sigpipe(os_process *process, int fd, const void *buf
     descriptors[1].events = POLLIN | POLLHUP;
     do
     {
-        if (atomic_load(&process->io_cancelled))
-            count = 0;
-        else if (poll(descriptors, 2, -1) < 0)
-            count = -1;
-        else if (descriptors[1].revents != 0)
-            count = 0;
-        else
-            count = write(fd, buffer, (size_t)capacity);
+        count = 0;
+        if (!atomic_load(&process->io_cancelled))
+        {
+            if (poll(descriptors, 2, -1) < 0)
+                count = -1;
+            else if (descriptors[1].revents == 0)
+                count = write(fd, buffer, (size_t)capacity);
+        }
     } while (count < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK));
     saved_error = count < 0 ? errno : 0;
     if (saved_error == EPIPE && !pipe_is_ignored)
@@ -521,8 +518,14 @@ int os_process_write_stdin(os_process *process, const void *buffer, int capacity
 void os_process_cancel_io(os_process *process)
 {
     char byte = 0;
+    ssize_t count;
     if (process != NULL && !atomic_exchange(&process->io_cancelled, 1))
-        (void)write(process->cancel_write_fd, &byte, 1);
+    {
+        do
+        {
+            count = write(process->cancel_write_fd, &byte, 1);
+        } while (count < 0 && errno == EINTR);
+    }
 }
 
 int os_process_close_stdin(os_process *process)

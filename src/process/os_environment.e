@@ -384,7 +384,7 @@ feature {NONE} -- Implementation
 
 invariant
 
-	variable_names_valid: across variables as stored all valid_variable_name (@ stored.key) end
+	variable_names_valid: across variables as stored all valid_variable_name (@stored.key) end
 	variable_values_valid: across variables as stored all valid_variable_value (stored) end
 	windows_keys_caseless: {PLATFORM}.is_windows implies variables.is_case_insensitive
 	unix_keys_case_sensitive: not {PLATFORM}.is_windows implies not variables.is_case_insensitive

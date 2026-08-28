@@ -302,8 +302,7 @@ static int append_unique_handle(HANDLE handles[], SIZE_T *count, HANDLE handle)
 os_process *os_process_start(const char *executable, char *const arguments[],
                              char *const environment[], const char *working_directory,
                              int stdin_mode, int stdout_mode, int stderr_mode,
-                             int allow_terminal_stdin,
-                             int *error_code)
+                             int allow_terminal_stdin, int *error_code)
 {
     SECURITY_ATTRIBUTES security = {sizeof(security), NULL, TRUE};
     HANDLE stdout_read = NULL, stdout_write = NULL;
@@ -330,10 +329,9 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     *error_code = 0;
     if (executable == NULL || arguments == NULL || environment == NULL ||
         (stdin_mode != OS_PROCESS_STDIN_PIPE && stdin_mode != OS_PROCESS_STDIN_INHERIT) ||
-        (stdout_mode != OS_PROCESS_OUTPUT_CAPTURE &&
-         stdout_mode != OS_PROCESS_OUTPUT_INHERIT && stdout_mode != OS_PROCESS_OUTPUT_DISCARD) ||
-        (stderr_mode != OS_PROCESS_OUTPUT_CAPTURE &&
-         stderr_mode != OS_PROCESS_OUTPUT_INHERIT &&
+        (stdout_mode != OS_PROCESS_OUTPUT_CAPTURE && stdout_mode != OS_PROCESS_OUTPUT_INHERIT &&
+         stdout_mode != OS_PROCESS_OUTPUT_DISCARD) ||
+        (stderr_mode != OS_PROCESS_OUTPUT_CAPTURE && stderr_mode != OS_PROCESS_OUTPUT_INHERIT &&
          stderr_mode != OS_PROCESS_OUTPUT_DISCARD && stderr_mode != OS_PROCESS_STDERR_MERGE) ||
         (allow_terminal_stdin != 0 && allow_terminal_stdin != 1))
     {
@@ -398,7 +396,8 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     }
     else if (stdout_mode == OS_PROCESS_OUTPUT_INHERIT)
     {
-        windows_error = (DWORD)duplicate_inheritable(GetStdHandle(STD_OUTPUT_HANDLE), &child_stdout);
+        windows_error =
+            (DWORD)duplicate_inheritable(GetStdHandle(STD_OUTPUT_HANDLE), &child_stdout);
         if (windows_error != ERROR_SUCCESS)
             goto fail;
     }
@@ -473,11 +472,10 @@ os_process *os_process_start(const char *executable, char *const arguments[],
        lpEnvironment. OS_COMMAND has already resolved application_name so the
        child environment and executable lookup use the same snapshot. */
     started_at = GetTickCount64();
-    if (!CreateProcessW(application_name, command_line, NULL, NULL, TRUE,
-                        EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT |
-                            CREATE_SUSPENDED,
-                        environment_block, working_directory_wide,
-                        &startup.StartupInfo, &information))
+    if (!CreateProcessW(
+            application_name, command_line, NULL, NULL, TRUE,
+            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
+            environment_block, working_directory_wide, &startup.StartupInfo, &information))
     {
         windows_error = GetLastError();
         goto fail;
@@ -666,13 +664,11 @@ int os_process_timeout_remaining(os_process *process, int timeout_milliseconds)
     if (process == NULL || timeout_milliseconds <= 0)
         return 0;
     elapsed = GetTickCount64() - process->started_at;
-    return elapsed >= (ULONGLONG)timeout_milliseconds
-               ? 0
-               : timeout_milliseconds - (int)elapsed;
+    return elapsed >= (ULONGLONG)timeout_milliseconds ? 0 : timeout_milliseconds - (int)elapsed;
 }
 
-int os_process_wait_for(os_process *process, int timeout_milliseconds,
-                        int *timed_out, int *exit_code)
+int os_process_wait_for(os_process *process, int timeout_milliseconds, int *timed_out,
+                        int *exit_code)
 {
     DWORD result;
     int remaining;

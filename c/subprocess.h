@@ -41,8 +41,7 @@ extern "C"
     os_process *os_process_start(const char *executable, char *const arguments[],
                                  char *const environment[], const char *working_directory,
                                  int stdin_mode, int stdout_mode, int stderr_mode,
-                                 int allow_terminal_stdin,
-                                 int *error_code);
+                                 int allow_terminal_stdin, int *error_code);
 
     /*
      * Exactly one caller may use each standard-I/O endpoint. The stdout reader,
@@ -66,8 +65,8 @@ extern "C"
      * platform-specific.
      */
     int os_process_wait(os_process *process, int *exit_code);
-    int os_process_wait_for(os_process *process, int timeout_milliseconds,
-                            int *timed_out, int *exit_code);
+    int os_process_wait_for(os_process *process, int timeout_milliseconds, int *timed_out,
+                            int *exit_code);
     int os_process_timeout_remaining(os_process *process, int timeout_milliseconds);
     int os_process_restore_terminal(os_process *process);
     int os_process_terminate(os_process *process);

@@ -137,8 +137,7 @@ static int decoded_exit_code(int status)
 os_process *os_process_start(const char *executable, char *const arguments[],
                              char *const environment[], const char *working_directory,
                              int stdin_mode, int stdout_mode, int stderr_mode,
-                             int allow_terminal_stdin,
-                             int *error_code)
+                             int allow_terminal_stdin, int *error_code)
 {
     int stdin_pipe[2] = {-1, -1};
     int stdout_pipe[2] = {-1, -1};
@@ -161,17 +160,15 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     }
     if (executable == NULL || arguments == NULL || environment == NULL || error_code == NULL ||
         (stdin_mode != OS_PROCESS_STDIN_PIPE && stdin_mode != OS_PROCESS_STDIN_INHERIT) ||
-        (stdout_mode != OS_PROCESS_OUTPUT_CAPTURE &&
-         stdout_mode != OS_PROCESS_OUTPUT_INHERIT && stdout_mode != OS_PROCESS_OUTPUT_DISCARD) ||
-        (stderr_mode != OS_PROCESS_OUTPUT_CAPTURE &&
-         stderr_mode != OS_PROCESS_OUTPUT_INHERIT &&
+        (stdout_mode != OS_PROCESS_OUTPUT_CAPTURE && stdout_mode != OS_PROCESS_OUTPUT_INHERIT &&
+         stdout_mode != OS_PROCESS_OUTPUT_DISCARD) ||
+        (stderr_mode != OS_PROCESS_OUTPUT_CAPTURE && stderr_mode != OS_PROCESS_OUTPUT_INHERIT &&
          stderr_mode != OS_PROCESS_OUTPUT_DISCARD && stderr_mode != OS_PROCESS_STDERR_MERGE) ||
         (allow_terminal_stdin != 0 && allow_terminal_stdin != 1))
     {
         return NULL;
     }
-    if (stdin_mode == OS_PROCESS_STDIN_INHERIT && isatty(STDIN_FILENO) &&
-        !allow_terminal_stdin)
+    if (stdin_mode == OS_PROCESS_STDIN_INHERIT && isatty(STDIN_FILENO) && !allow_terminal_stdin)
     {
         *error_code = ENOTSUP;
         return NULL;
@@ -274,8 +271,8 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     }
     else if (stdout_mode == OS_PROCESS_OUTPUT_DISCARD)
     {
-        ADD_ACTION(posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null",
-                                                    O_WRONLY, 0));
+        ADD_ACTION(
+            posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0));
     }
     if (stderr_mode == OS_PROCESS_OUTPUT_CAPTURE)
     {
@@ -285,8 +282,8 @@ os_process *os_process_start(const char *executable, char *const arguments[],
     }
     else if (stderr_mode == OS_PROCESS_OUTPUT_DISCARD)
     {
-        ADD_ACTION(posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null",
-                                                    O_WRONLY, 0));
+        ADD_ACTION(
+            posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0));
     }
     else if (stderr_mode == OS_PROCESS_STDERR_MERGE)
     {
@@ -588,8 +585,8 @@ int os_process_timeout_remaining(os_process *process, int timeout_milliseconds)
     return elapsed >= timeout_milliseconds ? 0 : timeout_milliseconds - elapsed;
 }
 
-int os_process_wait_for(os_process *process, int timeout_milliseconds,
-                        int *timed_out, int *exit_code)
+int os_process_wait_for(os_process *process, int timeout_milliseconds, int *timed_out,
+                        int *exit_code)
 {
     struct timespec pause = {0, 10000000};
     int status;

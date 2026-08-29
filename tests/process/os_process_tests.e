@@ -592,6 +592,20 @@ feature -- Test
 			assert_false ("timeout unsuccessful", command.successful)
 		end
 
+	test_timeout_seconds_terminates_execution
+			-- Convert a deadline in whole seconds and enforce it.
+		local
+			command: OS_COMMAND
+		do
+			create command.make (process_child_executable, child_arguments ("sleep"))
+			command.set_timeout_seconds (1)
+			command.run
+			assert_true ("seconds timeout finished", command.finished)
+			assert_true ("seconds timeout recorded", command.was_timed_out)
+			assert_false ("seconds timeout is not client termination", command.was_terminated_by_client)
+			assert_false ("seconds timeout unsuccessful", command.successful)
+		end
+
 	test_timeout_covers_descendant_pipe_lifetime
 			-- Expire even after the direct shell exits while a descendant holds its pipe.
 		local

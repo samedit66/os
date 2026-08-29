@@ -161,6 +161,17 @@ feature -- Change
 			end
 		end
 
+	set_timeout_seconds (a_timeout: INTEGER)
+			-- Limit the overall execution to `a_timeout` seconds.
+			-- The deadline covers process execution and inherited capture pipes.
+		require
+			can_start: can_start
+			positive_timeout: a_timeout > 0
+			timeout_fits_milliseconds: a_timeout <= {INTEGER}.max_value // 1_000
+		do
+			set_timeout_milliseconds (a_timeout * 1_000)
+		end
+
 	clear_timeout
 			-- Remove the overall execution deadline.
 		require

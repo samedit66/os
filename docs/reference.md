@@ -99,8 +99,9 @@ captured bytes remain available.
 
 ### Deadlines and descendants
 
-`set_timeout_milliseconds` sets an overall execution deadline. It covers the
-direct process and I/O completion, including descendants that inherited a
+`set_timeout_milliseconds` sets an overall execution deadline.
+`set_timeout_seconds` provides the same deadline in whole seconds. Both cover
+the direct process and I/O completion, including descendants that inherited a
 capture pipe. `clear_timeout` restores unlimited execution.
 
 On expiration, the managed process tree is killed, pipes receive a one-second

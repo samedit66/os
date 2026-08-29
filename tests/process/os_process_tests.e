@@ -52,7 +52,6 @@ feature -- Test
 			-- Preserve spaces, quotes, backslashes, and an empty argument.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 			arguments: ARRAYED_LIST [READABLE_STRING_GENERAL]
 		do
 			create arguments.make (7)
@@ -65,61 +64,54 @@ feature -- Test
 			arguments.extend ("")
 			create command.make (process_child_executable, arguments)
 			command.run
-			process_result := command.execution_result
-			assert_integers_equal ("arguments exit", 0, process_result.exit_code)
-			assert_readable_strings_equal ("arguments stdout", "[11]hello world[3]a%"b[3]c\d[16]ends with slash\[0]", process_result.stdout)
-			assert_true ("arguments stderr", process_result.stderr.is_empty)
+			assert_integers_equal ("arguments exit", 0, command.exit_code)
+			assert_readable_strings_equal ("arguments stdout", "[11]hello world[3]a%"b[3]c\d[16]ends with slash\[0]", command.stdout)
+			assert_true ("arguments stderr", command.stderr.is_empty)
 		end
 
 	test_nonzero_exit
 			-- Return the child's nonzero exit status.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make (process_child_executable, child_arguments ("exit-seven"))
 			command.run
-			process_result := command.execution_result
-			assert_true ("nonzero child launched", process_result.was_launched)
-			assert_true ("nonzero exit available", process_result.has_exit_code)
-			assert_integers_equal ("nonzero exit", 7, process_result.exit_code)
-			assert_false ("nonzero successful", process_result.successful)
-			assert_false ("nonzero has no library failure", process_result.has_failures)
+			assert_true ("nonzero child launched", command.was_launched)
+			assert_true ("nonzero exit available", command.has_exit_code)
+			assert_integers_equal ("nonzero exit", 7, command.exit_code)
+			assert_false ("nonzero successful", command.successful)
+			assert_false ("nonzero has no library failure", command.has_failures)
 		end
 
 	test_child_exit_127
 			-- Distinguish a child exit code 127 from a launch failure.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make (process_child_executable, child_arguments ("exit-127"))
 			command.run
-			process_result := command.execution_result
-			assert_true ("exit 127 child launched", process_result.was_launched)
-			assert_true ("exit 127 available", process_result.has_exit_code)
-			assert_integers_equal ("exit 127 code", 127, process_result.exit_code)
-			assert_false ("exit 127 unsuccessful", process_result.successful)
-			assert_false ("exit 127 has no library failure", process_result.has_failures)
+			assert_true ("exit 127 child launched", command.was_launched)
+			assert_true ("exit 127 available", command.has_exit_code)
+			assert_integers_equal ("exit 127 code", 127, command.exit_code)
+			assert_false ("exit 127 unsuccessful", command.successful)
+			assert_false ("exit 127 has no library failure", command.has_failures)
 		end
 
 	test_streaming_callbacks
 			-- Capture each stream and forward the same bytes to its callback.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			callback_stdout.wipe_out
 			callback_stderr.wipe_out
 			create command.make (process_child_executable, child_arguments ("emit"))
 			command.start_streaming (agent append_stdout, agent append_stderr)
 			command.wait_for_exit
-			process_result := command.execution_result
-			assert_integers_equal ("stream exit", 0, process_result.exit_code)
-			assert_readable_strings_equal ("stream stdout", "stdout-data", process_result.stdout)
-			assert_readable_strings_equal ("stream stderr", "stderr-data", process_result.stderr)
-			assert_readable_strings_equal ("stdout callback", process_result.stdout, callback_stdout)
-			assert_readable_strings_equal ("stderr callback", process_result.stderr, callback_stderr)
+			assert_integers_equal ("stream exit", 0, command.exit_code)
+			assert_readable_strings_equal ("stream stdout", "stdout-data", command.stdout)
+			assert_readable_strings_equal ("stream stderr", "stderr-data", command.stderr)
+			assert_readable_strings_equal ("stdout callback", command.stdout, callback_stdout)
+			assert_readable_strings_equal ("stderr callback", command.stderr, callback_stderr)
 			assert_true ("stream finished", command.finished)
 		end
 
@@ -127,18 +119,16 @@ feature -- Test
 			-- Contain one callback exception and report it after cleanup.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			callback_call_count := 0
 			create command.make (process_child_executable, child_arguments ("large"))
 			command.start_streaming (agent fail_stdout, Void)
 			command.wait_for_exit
-			process_result := command.execution_result
 			assert_true ("callback process finished", command.finished)
 			assert_integers_equal ("callback disabled after failure", 1, callback_call_count)
-			assert_true ("callback failure recorded", process_result.has_failures)
-			assert_true ("stdout handler category", process_result.failures [process_result.failures.lower].kind.is_stdout_handler)
-			assert_integers_equal ("callback output retained", large_block_size * large_block_count, process_result.stdout.count)
+			assert_true ("callback failure recorded", command.has_failures)
+			assert_true ("stdout handler category", command.failures [command.failures.lower].kind.is_stdout_handler)
+			assert_integers_equal ("callback output retained", large_block_size * large_block_count, command.stdout.count)
 		end
 
 	test_autonomous_callback_failure
@@ -178,7 +168,7 @@ feature -- Test
 			create command.make (process_child_executable, child_arguments ("emit"))
 			command.start_streaming (agent fail_stdout, agent fail_stderr)
 			command.wait_for_exit
-			failure_snapshot := command.execution_result.failures
+			failure_snapshot := command.failures
 			assert_integers_equal ("both handlers called once", 2, callback_call_count)
 			assert_integers_equal ("two handler failures", 2, indexable_count (failure_snapshot))
 			assert_true ("stdout handler ordered first", failure_snapshot [failure_snapshot.lower].kind.is_stdout_handler)
@@ -193,76 +183,68 @@ feature -- Test
 		do
 			create command.make ("os-process-command-that-must-not-exist-4f27a5b2", create {ARRAYED_LIST [READABLE_STRING_GENERAL]}.make (0))
 			command.run
-			snapshot := command.execution_result.failures
+			snapshot := command.failures
 			if attached {ARRAYED_LIST [OS_PROCESS_FAILURE]} snapshot as mutable_snapshot then
 				mutable_snapshot.wipe_out
 			end
-			assert_integers_equal ("result keeps private failures", 1, indexable_count (command.execution_result.failures))
+			assert_integers_equal ("result keeps private failures", 1, indexable_count (command.failures))
 		end
 
 	test_large_output
 			-- Drain both pipes concurrently when each exceeds kernel pipe capacity.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make (process_child_executable, child_arguments ("large"))
 			command.run
-			process_result := command.execution_result
-			assert_integers_equal ("large exit", 0, process_result.exit_code)
-			assert_integers_equal ("large stdout", large_block_size * large_block_count, process_result.stdout.count)
-			assert_integers_equal ("large stderr", large_block_size * large_block_count, process_result.stderr.count)
+			assert_integers_equal ("large exit", 0, command.exit_code)
+			assert_integers_equal ("large stdout", large_block_size * large_block_count, command.stdout.count)
+			assert_integers_equal ("large stderr", large_block_size * large_block_count, command.stderr.count)
 		end
 
 	test_default_stdio_is_captured
 			-- Preserve the historical captured-output defaults explicitly.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make (process_child_executable, child_arguments ("emit"))
 			command.run
-			process_result := command.execution_result
-			assert_true ("default stdout captured", process_result.stdout_was_captured)
-			assert_true ("default stderr captured", process_result.stderr_was_captured)
-			assert_false ("default stderr separate", process_result.stderr_was_merged)
-			assert_readable_strings_equal ("default stdout", "stdout-data", process_result.stdout)
-			assert_readable_strings_equal ("default stderr", "stderr-data", process_result.stderr)
+			assert_true ("default stdout captured", command.stdout_was_captured)
+			assert_true ("default stderr captured", command.stderr_was_captured)
+			assert_false ("default stderr separate", command.stderr_was_merged)
+			assert_readable_strings_equal ("default stdout", "stdout-data", command.stdout)
+			assert_readable_strings_equal ("default stderr", "stderr-data", command.stderr)
 		end
 
 	test_discard_output
 			-- Avoid creating capture pipes or retaining discarded output.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make (process_child_executable, child_arguments ("emit"))
 			command.discard_stdout
 			command.discard_stderr
 			command.run
-			process_result := command.execution_result
-			assert_true ("discard execution successful", process_result.successful)
-			assert_false ("stdout not captured", process_result.stdout_was_captured)
-			assert_false ("stderr not captured", process_result.stderr_was_captured)
-			assert_false ("stderr not merged", process_result.stderr_was_merged)
+			assert_true ("discard execution successful", command.successful)
+			assert_false ("stdout not captured", command.stdout_was_captured)
+			assert_false ("stderr not captured", command.stderr_was_captured)
+			assert_false ("stderr not merged", command.stderr_was_merged)
 		end
 
 	test_merge_stderr_into_captured_stdout
 			-- Read both native streams through the sole stdout capture pipe.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make (process_child_executable, child_arguments ("emit"))
 			command.merge_stderr
 			command.run
-			process_result := command.execution_result
-			assert_true ("merged execution successful", process_result.successful)
-			assert_true ("merged stdout captured", process_result.stdout_was_captured)
-			assert_false ("merged stderr not separate", process_result.stderr_was_captured)
-			assert_true ("merged stderr flagged", process_result.stderr_was_merged)
-			assert_true ("merged stdout bytes", process_result.stdout.has_substring ("stdout-data"))
-			assert_true ("merged stderr bytes", process_result.stdout.has_substring ("stderr-data"))
+			assert_true ("merged execution successful", command.successful)
+			assert_true ("merged stdout captured", command.stdout_was_captured)
+			assert_false ("merged stderr not separate", command.stderr_was_captured)
+			assert_true ("merged stderr flagged", command.stderr_was_merged)
+			assert_true ("merged stdout bytes", command.stdout.has_substring ("stdout-data"))
+			assert_true ("merged stderr bytes", command.stdout.has_substring ("stderr-data"))
 		end
 
 	test_set_input_restores_piped_stdin
@@ -274,27 +256,24 @@ feature -- Test
 			command.inherit_stdin
 			command.set_input ("piped-after-inherit")
 			command.run
-			assert_readable_strings_equal ("restored pipe input", "piped-after-inherit", command.execution_result.stdout)
+			assert_readable_strings_equal ("restored pipe input", "piped-after-inherit", command.stdout)
 		end
 
 	test_default_input_is_eof
 			-- Close standard input immediately when no bytes are configured.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make (process_child_executable, child_arguments ("count-input"))
 			command.run
-			process_result := command.execution_result
-			assert_integers_equal ("default input exit", 0, process_result.exit_code)
-			assert_readable_strings_equal ("default input count", "0", process_result.stdout)
+			assert_integers_equal ("default input exit", 0, command.exit_code)
+			assert_readable_strings_equal ("default input count", "0", command.stdout)
 		end
 
 	test_input_bytes_and_caller_snapshot
 			-- Preserve all STRING_8 bytes and do not retain the caller's string.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 			bytes: STRING_8
 		do
 			create bytes.make_from_string ("before")
@@ -304,34 +283,28 @@ feature -- Test
 			command.set_input (bytes)
 			bytes.wipe_out
 			command.run
-			process_result := command.execution_result
-			assert_integers_equal ("byte input exit", 0, process_result.exit_code)
-			assert_readable_strings_equal ("byte input", "8:98,101,102,111,114,101,0,255", process_result.stdout)
+			assert_integers_equal ("byte input exit", 0, command.exit_code)
+			assert_readable_strings_equal ("byte input", "8:98,101,102,111,114,101,0,255", command.stdout)
 		end
 
 	test_input_snapshot_for_sequential_starts
 			-- Give each sequential execution the input configured before its start.
 		local
 			command: OS_COMMAND
-			first_result: OS_PROCESS_EXECUTION_RESULT
-			second_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make (process_child_executable, child_arguments ("echo-input"))
 			command.set_input ("first input")
 			command.run
-			first_result := command.execution_result
+			assert_readable_strings_equal ("first input snapshot", "first input", command.stdout)
 			command.set_input ("second input")
 			command.run
-			second_result := command.execution_result
-			assert_readable_strings_equal ("first input snapshot", "first input", first_result.stdout)
-			assert_readable_strings_equal ("second input snapshot", "second input", second_result.stdout)
+			assert_readable_strings_equal ("second input snapshot", "second input", command.stdout)
 		end
 
 	test_large_duplex_input_and_output
 			-- Avoid deadlock when all three standard pipes exceed kernel capacity.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 			bytes: STRING_8
 			output_byte_count: INTEGER
 		do
@@ -339,34 +312,30 @@ feature -- Test
 			create command.make (process_child_executable, child_arguments ("duplex"))
 			command.set_input (bytes)
 			command.run
-			process_result := command.execution_result
 			output_byte_count := large_block_size * large_block_count
-			assert_integers_equal ("duplex exit", 0, process_result.exit_code)
-			assert_integers_equal ("duplex stdout count", output_byte_count + bytes.count.out.count, process_result.stdout.count)
-			assert_readable_strings_equal ("duplex input count", bytes.count.out, process_result.stdout.substring (output_byte_count + 1, process_result.stdout.count))
-			assert_integers_equal ("duplex stderr count", output_byte_count, process_result.stderr.count)
+			assert_integers_equal ("duplex exit", 0, command.exit_code)
+			assert_integers_equal ("duplex stdout count", output_byte_count + bytes.count.out.count, command.stdout.count)
+			assert_readable_strings_equal ("duplex input count", bytes.count.out, command.stdout.substring (output_byte_count + 1, command.stdout.count))
+			assert_integers_equal ("duplex stderr count", output_byte_count, command.stderr.count)
 		end
 
 	test_early_input_close
 			-- Treat child exit during a large write as a normal broken pipe.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 			bytes: STRING_8
 		do
 			create bytes.make_filled ('i', large_block_size * large_block_count)
 			create command.make (process_child_executable, child_arguments ("close-input"))
 			command.set_input (bytes)
 			command.run
-			process_result := command.execution_result
-			assert_integers_equal ("early close exit", 0, process_result.exit_code)
+			assert_integers_equal ("early close exit", 0, command.exit_code)
 		end
 
 	test_shell_input
 			-- Feed configured input through a command created with `make_shell`.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			if {PLATFORM}.is_windows then
 				create command.make_shell ("findstr .")
@@ -376,9 +345,8 @@ feature -- Test
 				command.set_input ("shell-input")
 			end
 			command.run
-			process_result := command.execution_result
-			assert_integers_equal ("shell input exit", 0, process_result.exit_code)
-			assert_true ("shell input", process_result.stdout.has_substring ("shell-input"))
+			assert_integers_equal ("shell input exit", 0, command.exit_code)
+			assert_true ("shell input", command.stdout.has_substring ("shell-input"))
 		end
 
 	test_wait_is_idempotent
@@ -390,82 +358,74 @@ feature -- Test
 			create command.make (process_child_executable, child_arguments ("emit"))
 			command.start
 			command.wait_for_exit
-			first_output := command.execution_result.stdout
+			first_output := command.stdout
 			command.wait_for_exit
-			assert_integers_equal ("second wait exit", 0, command.execution_result.exit_code)
-			assert_readable_strings_equal ("second wait output", first_output, command.execution_result.stdout)
+			assert_integers_equal ("second wait exit", 0, command.exit_code)
+			assert_readable_strings_equal ("second wait output", first_output, command.stdout)
 		end
 
 	test_missing_command
 			-- Represent a missing executable without a synthetic exit code.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make ("os-process-command-that-must-not-exist-4f27a5b2", create {ARRAYED_LIST [READABLE_STRING_GENERAL]}.make (0))
 			command.run
-			process_result := command.execution_result
-			assert_false ("missing command not launched", process_result.was_launched)
-			assert_false ("missing command has no exit", process_result.has_exit_code)
-			assert_true ("missing command failure", process_result.has_failures)
-			assert_true ("missing command launch category", process_result.failures [process_result.failures.lower].kind.is_launch)
-			assert_true ("missing stdout", process_result.stdout.is_empty)
-			assert_true ("missing stderr", process_result.stderr.is_empty)
+			assert_false ("missing command not launched", command.was_launched)
+			assert_false ("missing command has no exit", command.has_exit_code)
+			assert_true ("missing command failure", command.has_failures)
+			assert_true ("missing command launch category", command.failures [command.failures.lower].kind.is_launch)
+			assert_true ("missing stdout", command.stdout.is_empty)
+			assert_true ("missing stderr", command.stderr.is_empty)
 		end
 
 	test_missing_working_directory
 			-- Represent an unavailable working directory as a launch failure.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make (process_child_executable, child_arguments ("working-directory"))
 			command.set_working_directory (current_test_root.name)
 			command.run
-			process_result := command.execution_result
-			assert_false ("missing directory not launched", process_result.was_launched)
-			assert_false ("missing directory has no exit", process_result.has_exit_code)
-			assert_true ("missing directory failure", process_result.has_failures)
-			assert_true ("missing directory stdout", process_result.stdout.is_empty)
-			assert_true ("missing directory stderr", process_result.stderr.is_empty)
+			assert_false ("missing directory not launched", command.was_launched)
+			assert_false ("missing directory has no exit", command.has_exit_code)
+			assert_true ("missing directory failure", command.has_failures)
+			assert_true ("missing directory stdout", command.stdout.is_empty)
+			assert_true ("missing directory stderr", command.stderr.is_empty)
 		end
 
 	test_path_lookup
 			-- Find a simple executable name through PATH without invoking a shell.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 			arguments: ARRAYED_LIST [READABLE_STRING_GENERAL]
 		do
 			create arguments.make (1)
 			arguments.extend ("--version")
 			create command.make ("git", arguments)
 			command.run
-			process_result := command.execution_result
-			assert_integers_equal ("PATH lookup", 0, process_result.exit_code)
+			assert_integers_equal ("PATH lookup", 0, command.exit_code)
 		end
 
 	test_configured_environment
 			-- Set, empty, remove, and clear variables in sequential child executions.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make (process_child_executable, environment_arguments (environment_test_variable))
 			command.set_environment_variable (environment_test_variable, "configured")
 			command.run
-			process_result := command.execution_result
-			assert_readable_strings_equal ("configured variable", "configured", process_result.stdout)
+			assert_readable_strings_equal ("configured variable", "configured", command.stdout)
 			command.set_environment_variable (environment_test_variable, "")
 			command.run
-			assert_readable_strings_equal ("empty variable", "empty", command.execution_result.stdout)
+			assert_readable_strings_equal ("empty variable", "empty", command.stdout)
 			command.unset_environment_variable (environment_test_variable)
 			command.run
-			assert_readable_strings_equal ("unset variable", "absent", command.execution_result.stdout)
+			assert_readable_strings_equal ("unset variable", "absent", command.stdout)
 			command.set_environment_variable (environment_test_variable, "before clear")
 			command.clear_environment
 			command.run
-			assert_readable_strings_equal ("cleared variable", "absent", command.execution_result.stdout)
+			assert_readable_strings_equal ("cleared variable", "absent", command.stdout)
 		end
 
 	test_command_environment_path_lookup
@@ -489,8 +449,8 @@ feature -- Test
 			assert_true ("bare executable found in command PATH", command.has_executable (executable_name.name))
 			assert_general_strings_equal ("command executable path", executable.name, command.executable_path (executable_name.name))
 			command.run
-			assert_true ("configured PATH launch", command.execution_result.successful)
-			assert_readable_strings_equal ("configured PATH output", "stdout-data", command.execution_result.stdout)
+			assert_true ("configured PATH launch", command.successful)
+			assert_readable_strings_equal ("configured PATH output", "stdout-data", command.stdout)
 		end
 
 	test_removed_path_has_no_parent_fallback
@@ -502,8 +462,8 @@ feature -- Test
 			command.unset_environment_variable ("PATH")
 			assert_false ("git absent without command PATH", command.has_executable ("git"))
 			command.run
-			assert_false ("removed PATH not launched", command.execution_result.was_launched)
-			assert_true ("removed PATH launch failure", command.execution_result.has_failures)
+			assert_false ("removed PATH not launched", command.was_launched)
+			assert_true ("removed PATH launch failure", command.has_failures)
 		end
 
 	test_relative_command_path_uses_working_directory
@@ -526,14 +486,13 @@ feature -- Test
 			command.prepend_to_path (".")
 			assert_general_strings_equal ("relative PATH resolution", executable.name, command.executable_path (executable_name.name))
 			command.run
-			assert_true ("relative PATH launch", command.execution_result.successful)
+			assert_true ("relative PATH launch", command.successful)
 		end
 
 	test_shell
 			-- Interpret command chaining and redirection through the platform shell.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			if {PLATFORM}.is_windows then
 				create command.make_shell ("echo shell-stdout&echo shell-stderr 1>&2&exit /b 9")
@@ -541,10 +500,9 @@ feature -- Test
 				create command.make_shell ("printf shell-stdout; printf shell-stderr >&2; exit 9")
 			end
 			command.run
-			process_result := command.execution_result
-			assert_integers_equal ("shell exit", 9, process_result.exit_code)
-			assert_true ("shell stdout", process_result.stdout.has_substring ("shell-stdout"))
-			assert_true ("shell stderr", process_result.stderr.has_substring ("shell-stderr"))
+			assert_integers_equal ("shell exit", 9, command.exit_code)
+			assert_true ("shell stdout", command.stdout.has_substring ("shell-stdout"))
+			assert_true ("shell stderr", command.stderr.has_substring ("shell-stderr"))
 		end
 
 	test_termination
@@ -560,8 +518,8 @@ feature -- Test
 			command.terminate
 			command.wait_for_exit
 			assert_true ("termination finished", command.finished)
-			assert_true ("termination recorded", command.execution_result.was_terminated_by_client)
-			assert_false ("terminated execution unsuccessful", command.execution_result.successful)
+			assert_true ("termination recorded", command.was_terminated_by_client)
+			assert_false ("terminated execution unsuccessful", command.successful)
 		end
 
 	test_termination_kills_process_tree
@@ -595,7 +553,7 @@ feature -- Test
 			environment.sleep (2_500_000_000)
 			create marker.make_with_path (marker_path)
 			assert_false ("descendant did not survive termination", marker.exists)
-			assert_true ("tree termination recorded", command.execution_result.was_terminated_by_client)
+			assert_true ("tree termination recorded", command.was_terminated_by_client)
 		end
 
 	test_terminate_completes_without_wait
@@ -617,23 +575,21 @@ feature -- Test
 				attempts := attempts + 1
 			end
 			assert_true ("terminate completed autonomously", command.finished)
-			assert_true ("autonomous termination recorded", command.execution_result.was_terminated_by_client)
+			assert_true ("autonomous termination recorded", command.was_terminated_by_client)
 		end
 
 	test_timeout_terminates_execution
 			-- Enforce an overall deadline without a client lifecycle call.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make (process_child_executable, child_arguments ("sleep"))
 			command.set_timeout_milliseconds (50)
 			command.run
-			process_result := command.execution_result
 			assert_true ("timeout finished", command.finished)
-			assert_true ("timeout recorded", process_result.was_timed_out)
-			assert_false ("timeout is not client termination", process_result.was_terminated_by_client)
-			assert_false ("timeout unsuccessful", process_result.successful)
+			assert_true ("timeout recorded", command.was_timed_out)
+			assert_false ("timeout is not client termination", command.was_terminated_by_client)
+			assert_false ("timeout unsuccessful", command.successful)
 		end
 
 	test_timeout_covers_descendant_pipe_lifetime
@@ -650,7 +606,7 @@ feature -- Test
 			create command.make_shell (shell_text)
 			command.set_timeout_milliseconds (100)
 			command.run
-			assert_true ("descendant pipe timeout", command.execution_result.was_timed_out)
+			assert_true ("descendant pipe timeout", command.was_timed_out)
 			assert_true ("descendant timeout finished", command.finished)
 		end
 
@@ -663,8 +619,8 @@ feature -- Test
 			command.set_timeout_milliseconds (1)
 			command.clear_timeout
 			command.run
-			assert_true ("cleared timeout successful", command.execution_result.successful)
-			assert_false ("cleared timeout absent", command.execution_result.was_timed_out)
+			assert_true ("cleared timeout successful", command.successful)
+			assert_false ("cleared timeout absent", command.was_timed_out)
 		end
 
 	test_lifecycle_calls_are_serialized
@@ -712,7 +668,6 @@ feature -- Test
 			-- Keep a private snapshot of the executable and argument data.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 			arguments: ARRAYED_LIST [READABLE_STRING_GENERAL]
 			mutable_executable: STRING_32
 			mutable_argument: STRING_32
@@ -728,43 +683,131 @@ feature -- Test
 			mutable_argument.replace_substring_all ("before", "after")
 			arguments.wipe_out
 			command.run
-			process_result := command.execution_result
-			assert_integers_equal ("copied arguments exit", 0, process_result.exit_code)
-			assert_readable_strings_equal ("copied arguments stdout", "[6]before", process_result.stdout)
+			assert_integers_equal ("copied arguments exit", 0, command.exit_code)
+			assert_readable_strings_equal ("copied arguments stdout", "[6]before", command.stdout)
 		end
 
 	test_repeated_command
 			-- Run one command object more than once.
 		local
 			command: OS_COMMAND
-			first_result: OS_PROCESS_EXECUTION_RESULT
-			second_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make (process_child_executable, child_arguments ("emit"))
 			command.run
-			first_result := command.execution_result
+			assert_readable_strings_equal ("first repeated output", "stdout-data", command.stdout)
 			command.run
-			second_result := command.execution_result
-			assert_readable_strings_equal ("first repeated output", "stdout-data", first_result.stdout)
-			assert_readable_strings_equal ("second repeated output", first_result.stdout, second_result.stdout)
+			assert_readable_strings_equal ("second repeated output", "stdout-data", command.stdout)
+		end
+
+	test_result_queries
+			-- Expose all terminal observations directly through Current.
+		local
+			command: OS_COMMAND
+		do
+			create command.make (process_child_executable, child_arguments ("emit"))
+			command.run
+			assert_true ("child launched", command.was_launched)
+			assert_true ("exit available", command.has_exit_code)
+			assert_integers_equal ("exit code", 0, command.exit_code)
+			assert_true ("stdout captured", command.stdout_was_captured)
+			assert_true ("stderr captured", command.stderr_was_captured)
+			assert_false ("stderr separate", command.stderr_was_merged)
+			assert_readable_strings_equal ("stdout", "stdout-data", command.stdout)
+			assert_readable_strings_equal ("stderr", "stderr-data", command.stderr)
+			assert_false ("not terminated", command.was_terminated_by_client)
+			assert_false ("not timed out", command.was_timed_out)
+			assert_false ("output complete", command.output_was_cut_off)
+			assert_false ("no failures", command.has_failures)
+			assert_integers_equal ("empty failures", 0, indexable_count (command.failures))
+			assert_true ("successful", command.successful)
+		end
+
+	test_result_queries_require_finished
+			-- Reject terminal result queries while an execution is active.
+		local
+			command: OS_COMMAND
+			caller: OS_COMMAND_LIFECYCLE_CALLER
+			caller_launched: BOOLEAN
+		do
+			create command.make (process_child_executable, child_arguments ("sleep"))
+			command.start
+			create caller.make_successful_query (command)
+			caller.launch
+			caller_launched := caller.is_last_launch_successful
+			if caller_launched then
+				caller.join
+			end
+			command.terminate
+			command.wait_for_exit
+			assert_true ("active result query launched", caller_launched)
+			assert_false ("active result query rejected", caller.successful)
+		end
+
+	test_exit_code_requires_available_code
+			-- Reject an exit-code query after a launch failure.
+		local
+			command: OS_COMMAND
+			caller: OS_COMMAND_LIFECYCLE_CALLER
+			caller_launched: BOOLEAN
+		do
+			create command.make ("os-process-command-that-must-not-exist-4f27a5b2", create {ARRAYED_LIST [READABLE_STRING_GENERAL]}.make (0))
+			command.run
+			create caller.make_exit_code_query (command)
+			caller.launch
+			caller_launched := caller.is_last_launch_successful
+			if caller_launched then
+				caller.join
+			end
+			assert_true ("exit-code query launched", caller_launched)
+			assert_false ("missing exit code rejected", caller.successful)
+		end
+
+	test_output_queries_require_capture
+			-- Reject output queries for streams that were not captured.
+		local
+			command: OS_COMMAND
+			stdout_caller: OS_COMMAND_LIFECYCLE_CALLER
+			stderr_caller: OS_COMMAND_LIFECYCLE_CALLER
+			stdout_caller_launched: BOOLEAN
+			stderr_caller_launched: BOOLEAN
+		do
+			create command.make (process_child_executable, child_arguments ("emit"))
+			command.discard_stdout
+			command.discard_stderr
+			command.run
+			create stdout_caller.make_stdout_query (command)
+			create stderr_caller.make_stderr_query (command)
+			stdout_caller.launch
+			stderr_caller.launch
+			stdout_caller_launched := stdout_caller.is_last_launch_successful
+			stderr_caller_launched := stderr_caller.is_last_launch_successful
+			if stdout_caller_launched then
+				stdout_caller.join
+			end
+			if stderr_caller_launched then
+				stderr_caller.join
+			end
+			assert_true ("stdout query launched", stdout_caller_launched)
+			assert_true ("stderr query launched", stderr_caller_launched)
+			assert_false ("uncaptured stdout rejected", stdout_caller.successful)
+			assert_false ("uncaptured stderr rejected", stderr_caller.successful)
 		end
 
 	test_run_matches_started_result
 			-- Publish equivalent results through synchronous and asynchronous execution.
 		local
 			command: OS_COMMAND
-			run_result: OS_PROCESS_EXECUTION_RESULT
-			started_result: OS_PROCESS_EXECUTION_RESULT
 		do
 			create command.make (process_child_executable, child_arguments ("emit"))
 			command.run
-			run_result := command.execution_result
+			assert_integers_equal ("run exit", 0, command.exit_code)
+			assert_readable_strings_equal ("run stdout", "stdout-data", command.stdout)
+			assert_readable_strings_equal ("run stderr", "stderr-data", command.stderr)
 			command.start
 			command.wait_for_exit
-			started_result := command.execution_result
-			assert_integers_equal ("matching exit", run_result.exit_code, started_result.exit_code)
-			assert_readable_strings_equal ("matching stdout", run_result.stdout, started_result.stdout)
-			assert_readable_strings_equal ("matching stderr", run_result.stderr, started_result.stderr)
+			assert_integers_equal ("started exit", 0, command.exit_code)
+			assert_readable_strings_equal ("started stdout", "stdout-data", command.stdout)
+			assert_readable_strings_equal ("started stderr", "stderr-data", command.stderr)
 		end
 
 	test_overlapping_command_starts_are_forbidden
@@ -805,22 +848,18 @@ feature -- Test
 			-- Inherit the parent working directory when none is configured.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 			environment: EXECUTION_ENVIRONMENT
 		do
 			create environment
 			create command.make (process_child_executable, child_arguments ("working-directory"))
 			command.run
-			process_result := command.execution_result
-			assert_readable_strings_equal ("inherited working directory", utf_8 (environment.current_working_path.name), process_result.stdout)
+			assert_readable_strings_equal ("inherited working directory", utf_8 (environment.current_working_path.name), command.stdout)
 		end
 
 	test_working_directory_snapshot
 			-- Apply later directory changes only to subsequent executions.
 		local
 			command: OS_COMMAND
-			first_result: OS_PROCESS_EXECUTION_RESULT
-			second_result: OS_PROCESS_EXECUTION_RESULT
 			first_directory: PATH
 			second_directory: PATH
 		do
@@ -831,12 +870,10 @@ feature -- Test
 			create command.make (process_child_executable, child_arguments ("working-directory"))
 			command.set_working_directory (first_directory.name)
 			command.run
-			first_result := command.execution_result
+			assert_readable_strings_equal ("started working directory", utf_8 (first_directory.canonical_path.name), command.stdout)
 			command.set_working_directory (second_directory.name)
 			command.run
-			second_result := command.execution_result
-			assert_readable_strings_equal ("started working directory", utf_8 (first_directory.canonical_path.name), first_result.stdout)
-			assert_readable_strings_equal ("updated working directory", utf_8 (second_directory.canonical_path.name), second_result.stdout)
+			assert_readable_strings_equal ("updated working directory", utf_8 (second_directory.canonical_path.name), command.stdout)
 		end
 
 	test_relative_working_directory_snapshot
@@ -864,7 +901,7 @@ feature -- Test
 				parent_changed := environment.return_code /= 0
 				assert_false ("parent directory restored", parent_changed)
 				command.wait_for_exit
-				assert_readable_strings_equal ("relative directory snapshot", utf_8 (original.canonical_path.name), command.execution_result.stdout)
+				assert_readable_strings_equal ("relative directory snapshot", utf_8 (original.canonical_path.name), command.stdout)
 			else
 				assert_true ("original directory attached", False)
 			end
@@ -892,9 +929,9 @@ feature -- Test
 				attempts := attempts + 1
 			end
 			if command.finished then
-				assert_integers_equal ("autonomous exit", 0, command.execution_result.exit_code)
-				assert_readable_strings_equal ("autonomous stdout", "stdout-data", command.execution_result.stdout)
-				assert_readable_strings_equal ("autonomous stderr", "stderr-data", command.execution_result.stderr)
+				assert_integers_equal ("autonomous exit", 0, command.exit_code)
+				assert_readable_strings_equal ("autonomous stdout", "stdout-data", command.stdout)
+				assert_readable_strings_equal ("autonomous stderr", "stderr-data", command.stderr)
 			else
 				command.terminate
 				command.wait_for_exit

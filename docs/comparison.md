@@ -12,8 +12,7 @@ The comparison covers:
 - Gobo Eiffel 26.06 `EXECUTION_ENVIRONMENT.system`,
   `EXECUTION_ENVIRONMENT.launch`, and
   [`KL_SHELL_COMMAND`](https://github.com/gobo-eiffel/gobo/blob/master/library/kernel/src/misc/kl_shell_command.e);
-- the current public contracts of [`OS_COMMAND`](../src/process/os_command.e)
-  and [`OS_PROCESS_EXECUTION_RESULT`](../src/process/os_process_execution_result.e).
+- the current public contracts of [`OS_COMMAND`](../src/process/os_command.e).
 
 ## Capability matrix
 
@@ -25,8 +24,8 @@ The comparison covers:
 | Explicit shell execution | `make_shell` makes shell interpretation an explicit choice | A command-line launcher is available separately | Shell execution is the primary model | `OS_COMMAND` makes the safer mode the normal one |
 | Synchronous and asynchronous execution | `run`, `start`, and `start_streaming` | `launch`, status queries, and wait operations | Synchronous `system` and fire-and-forget `launch` | Parity with EiffelStudio; more control than Gobo |
 | Autonomous lifecycle progress | Supervision, pipe cleanup, and result publication continue without polling | Provides waiting and timer-based facilities; lifecycle management remains exposed to the client | Asynchronous launch returns no managed process object | `OS_COMMAND` has the most cohesive ownership model |
-| Completed result value | One immutable result contains launch status, optional exit code, captured streams, termination state, timeout state, and failures | State is exposed through separate process attributes | Primarily a return or exit code | Major `OS_COMMAND` advantage |
-| Output capture | Standard output and error are captured separately by default and retained in the result | Streams can be read or sent to agents, but there is no equivalent immutable aggregate result | No built-in output capture | `OS_COMMAND` is simpler for run-and-collect workflows |
+| Completed result | Launch, exit, stream, termination, timeout, and failure queries are available directly on the command after it finishes | State is exposed through separate process attributes | Primarily a return or exit code | `OS_COMMAND` provides one cohesive result interface |
+| Output capture | Standard output and error are captured separately by default and retained by the command | Streams can be read or sent to agents, but there is no equivalent aggregate result interface | No built-in output capture | `OS_COMMAND` is simpler for run-and-collect workflows |
 | Streaming output | Separate stdout and stderr callbacks; ordering is preserved within each stream | Agent-based output and error redirection | No equivalent process-level callbacks | Broad parity with EiffelStudio; advantage over Gobo |
 | Callback failure handling | Callback exceptions are contained, recorded as structured failures, and do not discard captured bytes | No equivalent structured failure result | Not applicable | `OS_COMMAND` has a stronger explicit contract |
 | Output destinations | Capture, inherit, discard, and stderr-to-stdout merge | Parent stream, Eiffel stream/agent, file, and stderr merge | Requires shell redirection | EiffelStudio is broader because it supports files directly |

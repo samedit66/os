@@ -62,26 +62,26 @@ untrusted input into a shell command.
 
 ## 3. Inspect the result
 
-After `run`, read `execution_result`:
+After `run`, read the result directly from the command:
 
 ```eiffel
-local
-    process_result: OS_PROCESS_EXECUTION_RESULT
-do
-    process_result := command.execution_result
-    if process_result.successful then
-        io.put_string (process_result.stdout)
-    else
-        if process_result.stderr_was_captured then
-            io.error.put_string (process_result.stderr)
-        end
-        across process_result.failures as failure loop
-            io.error.put_string (failure.description)
-            io.error.put_new_line
-        end
+if command.successful then
+    io.put_string (command.stdout)
+else
+    if command.stderr_was_captured then
+        io.error.put_string (command.stderr)
+    end
+    across command.failures as failure loop
+        io.error.put_string (failure.description)
+        io.error.put_new_line
     end
 end
 ```
+
+All result queries require `finished`. In addition, `exit_code` requires
+`has_exit_code`, while `stdout` and `stderr` require their corresponding
+`*_was_captured` query. `run` establishes `finished`; asynchronous clients can
+wait with `wait_for_exit` or observe autonomous completion through `finished`.
 
 `successful` means all of the following:
 
@@ -100,7 +100,7 @@ Add an overall deadline before starting the command:
 ```eiffel
 command.set_timeout_milliseconds (5_000)
 command.run
-if command.execution_result.was_timed_out then
+if command.was_timed_out then
     io.error.put_string ("git did not finish within five seconds%N")
 end
 ```

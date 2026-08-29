@@ -52,7 +52,6 @@ feature {NONE} -- Initialization
 			not_started: not has_started
 			not_finished: not finished
 			can_start: can_start
-			no_failures: not has_failures
 		end
 
 	make_shell (a_command: READABLE_STRING_GENERAL)
@@ -386,11 +385,8 @@ feature -- Execution
 			-- Wait until autonomous cleanup and result publication have completed.
 		require
 			started: has_started
-		local
-			process: OS_PROCESS
 		do
-			process := attached_process
-			process.wait
+			attached_process.wait
 		ensure
 			finished: finished
 		end
@@ -435,29 +431,47 @@ feature -- Access
 			end
 		end
 
-	execution_result: OS_PROCESS_EXECUTION_RESULT
-			-- Terminal result of the latest execution.
+	exit_code: INTEGER
+			-- Child exit code from the latest execution.
 		require
 			finished: finished
+			has_exit_code: has_exit_code
 		do
-			Result := attached_process.execution_result
+			Result := latest_execution_result.exit_code
+		ensure
+			definition: Result = latest_execution_result.exit_code
+		end
+
+	stdout: READABLE_STRING_8
+			-- Captured standard-output bytes from the latest execution.
+		require
+			finished: finished
+			was_captured: stdout_was_captured
+		do
+			Result := latest_execution_result.stdout
+		ensure
+			definition: Result.same_string (latest_execution_result.stdout)
+		end
+
+	stderr: READABLE_STRING_8
+			-- Captured standard-error bytes from the latest execution.
+		require
+			finished: finished
+			was_captured: stderr_was_captured
+		do
+			Result := latest_execution_result.stderr
+		ensure
+			definition: Result.same_string (latest_execution_result.stderr)
 		end
 
 	failures: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
 			-- Defensive snapshot of failures from the latest execution.
-		local
-			process: detachable OS_PROCESS
-			snapshot: ARRAYED_LIST [OS_PROCESS_FAILURE]
+		require
+			finished: finished
 		do
-			command_mutex.lock
-			process := current_process
-			command_mutex.unlock
-			if attached process as active_process then
-				Result := active_process.failures
-			else
-				create snapshot.make (0)
-				Result := snapshot
-			end
+			Result := latest_execution_result.failures
+		ensure
+			count_preserved: Result.upper - Result.lower + 1 = latest_execution_result.failures.upper - latest_execution_result.failures.lower + 1
 		end
 
 feature -- Status report
@@ -528,18 +542,99 @@ feature -- Status report
 		require
 			finished: finished
 		do
-			Result := execution_result.successful
+			Result := latest_execution_result.successful
 		ensure
-			definition: Result = execution_result.successful
+			definition: Result = latest_execution_result.successful
 		end
 
 	has_failures: BOOLEAN
 			-- Have failures been recorded for the latest execution?
-		local
-			snapshot: READABLE_INDEXABLE [OS_PROCESS_FAILURE]
+		require
+			finished: finished
 		do
-			snapshot := failures
-			Result := snapshot.lower <= snapshot.upper
+			Result := latest_execution_result.has_failures
+		ensure
+			definition: Result = latest_execution_result.has_failures
+		end
+
+	was_launched: BOOLEAN
+			-- Was a child process successfully launched in the latest execution?
+		require
+			finished: finished
+		do
+			Result := latest_execution_result.was_launched
+		ensure
+			definition: Result = latest_execution_result.was_launched
+		end
+
+	has_exit_code: BOOLEAN
+			-- Is a child completion code available for the latest execution?
+		require
+			finished: finished
+		do
+			Result := latest_execution_result.has_exit_code
+		ensure
+			definition: Result = latest_execution_result.has_exit_code
+		end
+
+	stdout_was_captured: BOOLEAN
+			-- Was standard output captured in the latest execution?
+		require
+			finished: finished
+		do
+			Result := latest_execution_result.stdout_was_captured
+		ensure
+			definition: Result = latest_execution_result.stdout_was_captured
+		end
+
+	stderr_was_captured: BOOLEAN
+			-- Was standard error captured separately in the latest execution?
+		require
+			finished: finished
+		do
+			Result := latest_execution_result.stderr_was_captured
+		ensure
+			definition: Result = latest_execution_result.stderr_was_captured
+		end
+
+	stderr_was_merged: BOOLEAN
+			-- Was standard error redirected to standard output in the latest execution?
+		require
+			finished: finished
+		do
+			Result := latest_execution_result.stderr_was_merged
+		ensure
+			definition: Result = latest_execution_result.stderr_was_merged
+		end
+
+	was_terminated_by_client: BOOLEAN
+			-- Did a client termination request end the latest execution?
+		require
+			finished: finished
+		do
+			Result := latest_execution_result.was_terminated_by_client
+		ensure
+			definition: Result = latest_execution_result.was_terminated_by_client
+		end
+
+	was_timed_out: BOOLEAN
+			-- Did the latest execution exceed its configured deadline?
+		require
+			finished: finished
+		do
+			Result := latest_execution_result.was_timed_out
+		ensure
+			definition: Result = latest_execution_result.was_timed_out
+		end
+
+	output_was_cut_off: BOOLEAN
+			-- Was captured output from the latest execution stopped before EOF?
+		require
+			finished: finished
+		do
+			Result := latest_execution_result.output_was_cut_off
+		ensure
+			definition: Result = latest_execution_result.output_was_cut_off
 		end
 
 feature {NONE} -- State publication
@@ -650,6 +745,14 @@ feature {NONE} -- State publication
 			then
 				Result := process
 			end
+		end
+
+	latest_execution_result: OS_PROCESS_EXECUTION_RESULT
+			-- Terminal result used by Current's result queries.
+		require
+			finished: finished
+		do
+			Result := attached_process.execution_result
 		end
 
 	can_start_unlocked: BOOLEAN

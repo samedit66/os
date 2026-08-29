@@ -77,17 +77,15 @@ result:
 ```eiffel
 local
     command: OS_COMMAND
-    process_result: OS_PROCESS_EXECUTION_RESULT
 do
     create command.make ("git", <<"--version">>)
     command.set_timeout_milliseconds (5_000)
     command.run
-    process_result := command.execution_result
 
-    if process_result.successful then
-        io.put_string (process_result.stdout)
+    if command.successful then
+        io.put_string (command.stdout)
     else
-        across process_result.failures as failure loop
+        across command.failures as failure loop
             io.error.put_string (failure.description)
             io.error.put_new_line
         end
@@ -97,7 +95,7 @@ end
 
 `OS_COMMAND.make` passes its arguments directly to the child; they do not need
 shell escaping. Standard output and error are captured by default, and `run`
-waits until the execution result is available.
+waits until the result queries are available.
 
 Continue with the [getting-started tutorial](docs/tutorial.md), which covers
 installation, process results, timeouts, environments, and file paths. See the
@@ -114,7 +112,6 @@ has fewer capabilities. The complete tutorial program is in
 | --- | --- |
 | [`OS_COMMAND`](src/process/os_command.e) | Configure and execute a command |
 | [`OS_ENVIRONMENT`](src/process/os_environment.e) | Store an environment snapshot and resolve executables through `PATH` |
-| [`OS_PROCESS_EXECUTION_RESULT`](src/process/os_process_execution_result.e) | Inspect launch state, exit status, captured output, and failures |
 | [`OS_PROCESS_FAILURE`](src/process/os_process_failure.e) | Inspect a structured process-library failure |
 | [`OS_FILE_PATH`](src/file_path/os_file_path.e) | Compose paths and perform file and directory operations |
 

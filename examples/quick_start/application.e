@@ -19,22 +19,20 @@ feature {NONE} -- Initialization
 			-- Run the quick-start example.
 		local
 			command: OS_COMMAND
-			process_result: OS_PROCESS_EXECUTION_RESULT
 			directory: OS_FILE_PATH
 			file: OS_FILE_PATH
 		do
 			create command.make ("git", <<"--version">>)
 			command.set_timeout_milliseconds (5_000)
 			command.run
-			process_result := command.execution_result
-			if process_result.successful then
-				io.put_string (process_result.stdout)
+			if command.successful then
+				io.put_string (command.stdout)
 			else
-				if process_result.stderr_was_captured then
-					io.error.put_string (process_result.stderr)
+				if command.stderr_was_captured then
+					io.error.put_string (command.stderr)
 				end
 				across
-					process_result.failures
+					command.failures
 				as
 					failure
 				loop

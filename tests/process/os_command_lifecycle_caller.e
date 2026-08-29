@@ -20,7 +20,11 @@ create
 
 	make_wait,
 	make_terminate,
-	make_set_environment
+	make_set_environment,
+	make_successful_query,
+	make_exit_code_query,
+	make_stdout_query,
+	make_stderr_query
 
 feature {NONE} -- Initialization
 
@@ -48,6 +52,38 @@ feature {NONE} -- Initialization
 			make_thread
 		end
 
+	make_successful_query (a_command: OS_COMMAND)
+			-- Prepare one `successful` query on `a_command`.
+		do
+			command := a_command
+			operation := successful_query_operation
+			make_thread
+		end
+
+	make_exit_code_query (a_command: OS_COMMAND)
+			-- Prepare one `exit_code` query on `a_command`.
+		do
+			command := a_command
+			operation := exit_code_query_operation
+			make_thread
+		end
+
+	make_stdout_query (a_command: OS_COMMAND)
+			-- Prepare one `stdout` query on `a_command`.
+		do
+			command := a_command
+			operation := stdout_query_operation
+			make_thread
+		end
+
+	make_stderr_query (a_command: OS_COMMAND)
+			-- Prepare one `stderr` query on `a_command`.
+		do
+			command := a_command
+			operation := stderr_query_operation
+			make_thread
+		end
+
 feature -- Status report
 
 	successful: BOOLEAN
@@ -67,8 +103,16 @@ feature {NONE} -- Execution
 					command.wait_for_exit
 				elseif operation = terminate_operation then
 					command.terminate
-				else
+				elseif operation = set_environment_operation then
 					command.set_environment_variable ("OS_PROCESS_ACTIVE_CHANGE", "forbidden")
+				elseif operation = successful_query_operation then
+					ignored_boolean := command.successful
+				elseif operation = exit_code_query_operation then
+					ignored_integer := command.exit_code
+				elseif operation = stdout_query_operation then
+					ignored_output := command.stdout
+				else
+					ignored_output := command.stderr
 				end
 				successful := True
 			end
@@ -91,8 +135,25 @@ feature {NONE} -- Implementation
 
 	set_environment_operation: INTEGER = 5
 
+	successful_query_operation: INTEGER = 6
+
+	exit_code_query_operation: INTEGER = 7
+
+	stdout_query_operation: INTEGER = 8
+
+	stderr_query_operation: INTEGER = 9
+
+	ignored_boolean: BOOLEAN
+			-- Result retained only to evaluate a Boolean query.
+
+	ignored_integer: INTEGER
+			-- Result retained only to evaluate an integer query.
+
+	ignored_output: detachable READABLE_STRING_8
+			-- Result retained only to evaluate an output query.
+
 invariant
 
-	valid_operation: operation = wait_operation or operation = terminate_operation or operation = set_environment_operation
+	valid_operation: operation >= wait_operation and operation <= stderr_query_operation
 
 end

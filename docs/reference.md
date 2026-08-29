@@ -45,8 +45,8 @@ Choose an execution mode according to how the caller needs to synchronize:
 - `terminate` forcefully terminates the managed process tree.
 
 `finished` becomes true autonomously after native waiting, I/O cleanup, and
-result publication. Polling is not required to make progress. `execution_result`
-is available only when `finished` is true.
+result publication. Polling is not required to make progress. Terminal result
+queries are available only when `finished` is true.
 
 Executions cannot overlap on one command. Configuration can be changed and the
 command can be started again only when `can_start` is true. Configuration is
@@ -72,7 +72,7 @@ connects the child to the inherited input without creating an Eiffel writer.
 For each output stream, select capture, inheritance, or discard. Inherited and
 discarded bytes are not buffered in Eiffel memory. `merge_stderr` redirects
 stderr to the configured stdout destination. If stdout is captured, merged
-bytes appear in `execution_result.stdout`; no separate stderr snapshot exists.
+bytes appear in `stdout`; no separate stderr snapshot exists.
 Check `stdout_was_captured`, `stderr_was_captured`, and `stderr_was_merged`
 before reading conditional fields.
 
@@ -145,9 +145,15 @@ module independent of the file-path module.
 
 ### Execution results and failures
 
-[`OS_PROCESS_EXECUTION_RESULT`](../src/process/os_process_execution_result.e)
-contains launch state, optional exit code, stream metadata, captured bytes,
-termination state, and structured failures.
+`OS_COMMAND` exposes terminal execution observations directly. All result
+queries require `finished`; `exit_code` additionally requires `has_exit_code`,
+and each captured-output query requires its corresponding capture status.
+Starting a new execution makes these queries unavailable until that execution
+finishes; the queries then describe that latest execution.
+
+The former `execution_result` object query was removed. Clients obtain result
+information only through `OS_COMMAND`; this is an intentional breaking API
+change.
 
 `successful` is true only when the child was launched, has exit code zero, was
 not terminated or timed out, and the library recorded no failures.
